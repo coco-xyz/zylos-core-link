@@ -2049,17 +2049,8 @@ export async function initCommand(args) {
   }
 
   // Step 11: Start services
-  let servicesStarted = 0;
-  if (!skipConfirm) {
-    const startNow = await promptYesNo('\nStart services now? [Y/n]: ', true);
-    if (startNow) {
-      if (!quiet) console.log(`\n${heading('Starting services...')}`);
-      servicesStarted = startCoreServices(opts.webPassword);
-    }
-  } else {
-    if (!quiet) console.log(`\n${heading('Starting services...')}`);
-    servicesStarted = startCoreServices(opts.webPassword);
-  }
+  if (!quiet) console.log(`\n${heading('Starting services...')}`);
+  const servicesStarted = startCoreServices(opts.webPassword);
 
   if (servicesStarted > 0) {
     setupPm2Startup();
