@@ -1130,6 +1130,19 @@ async function upgradeSelfCore({ providedTempDir, branch, mode = 'merge' } = {})
 }
 
 export async function uninstallComponent(args) {
+  // zylos uninstall --self → full system uninstall
+  if (args.includes('--self')) {
+    const hasTarget = args.some(a => !a.startsWith('-'));
+    if (hasTarget) {
+      console.error('Error: --self cannot be combined with a component name.');
+      console.error('  To uninstall a component:  zylos uninstall <name>');
+      console.error('  To uninstall zylos itself: zylos uninstall --self');
+      process.exit(1);
+    }
+    const { selfUninstall } = await import('./self-uninstall.js');
+    return selfUninstall(args);
+  }
+
   const checkOnly = args.includes('--check');
   const jsonOutput = args.includes('--json');
   const explicitPurge = args.includes('--purge') || args.includes('purge');
@@ -1146,6 +1159,7 @@ export async function uninstallComponent(args) {
     console.log('  --purge    Also remove data directory');
     console.log('  --force    Remove even if other components depend on it');
     console.log('  --yes, -y  Skip confirmation (keeps data)');
+    console.log('  --self     Uninstall zylos entirely from the system');
     process.exit(1);
   }
 
