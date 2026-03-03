@@ -19,12 +19,14 @@ import { addComponent } from './commands/add.js';
 import { initCommand } from './commands/init.js';
 import { configCommand } from './commands/config.js';
 import { attachCommand } from './commands/attach.js';
+import { doctorCommand } from './commands/doctor.js';
 
 const commands = {
   // Environment setup
   init: initCommand,
   config: configCommand,
   attach: attachCommand,
+  doctor: doctorCommand,
   // Service management
   status: showStatus,
   logs: showLogs,
@@ -85,6 +87,8 @@ Setup:
   config get <key>    Get a config value
   config set <key> <value>  Set a config value
   attach              Attach to the Claude tmux session
+  doctor              Diagnose and repair Zylos installation
+                      --check   Diagnose only, no repairs
 
 Service Management:
   status              Show system status
