@@ -38,7 +38,7 @@ export class HeartbeatEngine {
    * @param {number} [options.downRetryInterval=3600] - Seconds between DOWN-state probes
    * @param {number} [options.signalGracePeriod=30] - Seconds to wait after claudeRunning transitions before probing
    * @param {number} [options.rateLimitDefaultCooldown=3600] - Default cooldown when reset time can't be parsed
-   * @param {number} [options.userMessageRecoveryCooldown=300] - Min seconds between user-message-triggered recoveries
+   * @param {number} [options.userMessageRecoveryCooldown=60] - Min seconds between user-message-triggered recoveries
    * @param {string} [options.initialHealth='ok']
    */
   constructor(deps, options = {}) {
@@ -48,7 +48,7 @@ export class HeartbeatEngine {
     this.downRetryInterval = options.downRetryInterval ?? 3600; // 1 hour
     this.signalGracePeriod = options.signalGracePeriod ?? 30;
     this.rateLimitDefaultCooldown = options.rateLimitDefaultCooldown ?? 3600; // 1 hour
-    this.userMessageRecoveryCooldown = options.userMessageRecoveryCooldown ?? 300; // 5 min
+    this.userMessageRecoveryCooldown = options.userMessageRecoveryCooldown ?? 60; // 1 min
 
     // Internal state
     this.healthState = options.initialHealth ?? 'ok';
@@ -118,14 +118,17 @@ export class HeartbeatEngine {
   }
 
   /**
-   * Notify that a user message was received while rate-limited.
-   * Triggers early recovery attempt (restart + heartbeat) if cooldown
-   * between user-message-triggered recoveries has elapsed.
+   * Notify that a user message was received while service is unavailable.
+   * Triggers or accelerates recovery depending on current health state.
    *
-   * Returns true if recovery was triggered, false if on cooldown.
+   * - rate_limited: clears cooldown for immediate recovery check
+   * - recovering: resets backoff to retry immediately
+   * - down: triggers immediate probe (skips downRetryInterval wait)
+   *
+   * Returns true if recovery was triggered/accelerated, false if on cooldown or healthy.
    */
   notifyUserMessage(currentTime) {
-    if (this.healthState !== 'rate_limited') return false;
+    if (this.healthState === 'ok') return false;
 
     if ((currentTime - this.lastUserMessageRecoveryAt) < this.userMessageRecoveryCooldown) {
       const remaining = this.userMessageRecoveryCooldown - (currentTime - this.lastUserMessageRecoveryAt);
@@ -134,9 +137,27 @@ export class HeartbeatEngine {
     }
 
     this.lastUserMessageRecoveryAt = currentTime;
-    this.deps.log('User message triggered rate-limit recovery attempt');
-    this.cooldownUntil = 0; // Clear cooldown to allow immediate recovery check
-    return true;
+
+    if (this.healthState === 'rate_limited') {
+      this.deps.log('User message triggered rate-limit recovery attempt');
+      this.cooldownUntil = 0;
+      return true;
+    }
+
+    if (this.healthState === 'recovering') {
+      this.deps.log('User message triggered recovery acceleration (backoff reset)');
+      this.restartFailureCount = 0;
+      this.lastRecoveryAt = 0;
+      return true;
+    }
+
+    if (this.healthState === 'down') {
+      this.deps.log('User message triggered immediate down-state probe');
+      this.lastDownCheckAt = 0;
+      return true;
+    }
+
+    return false;
   }
 
   processHeartbeat(claudeRunning, currentTime) {

@@ -131,6 +131,91 @@ describe('HeartbeatEngine — rate_limited recovery', () => {
   });
 });
 
+describe('HeartbeatEngine — user message recovery across all states', () => {
+  it('recovering: resets backoff for immediate retry', () => {
+    const phases = [];
+    const engine = new HeartbeatEngine(makeDeps({
+      enqueueHeartbeat: (phase) => { phases.push(phase); return true; },
+    }), { heartbeatInterval: 1800 });
+
+    // Enter recovering with high failure count (long backoff)
+    engine.triggerRecovery('test_fail');
+    engine.triggerRecovery('test_fail_2');
+    engine.triggerRecovery('test_fail_3');
+    expect(engine.health).toBe('recovering');
+    expect(engine.restartFailureCount).toBe(3);
+    const backoffBefore = engine.getBackoffDelay(); // 60 * 5^2 = 1500s
+
+    // User message resets backoff
+    const triggered = engine.notifyUserMessage(5000);
+    expect(triggered).toBe(true);
+    expect(engine.restartFailureCount).toBe(0);
+    expect(engine.lastRecoveryAt).toBe(0);
+
+    // Next processHeartbeat with claudeRunning should immediately send recovery heartbeat
+    phases.length = 0;
+    engine.processHeartbeat(true, 5001);
+    expect(phases).toContain('recovery');
+  });
+
+  it('down: triggers immediate probe by resetting lastDownCheckAt', () => {
+    const phases = [];
+    const engine = new HeartbeatEngine(makeDeps({
+      enqueueHeartbeat: (phase) => { phases.push(phase); return true; },
+    }), {
+      downDegradeThreshold: 10,
+      downRetryInterval: 3600,
+    });
+
+    // Enter down state
+    engine.triggerRecovery('fail');
+    engine.recoveringStartedAt = 1;
+    engine.triggerRecovery('fail_degrade');
+    expect(engine.health).toBe('down');
+
+    // Without user message, would need to wait downRetryInterval (3600s)
+    engine.lastDownCheckAt = 5000;
+    phases.length = 0;
+    engine.processHeartbeat(true, 5100); // Only 100s since last check, < 3600
+    expect(phases).toEqual([]);
+
+    // User message resets lastDownCheckAt
+    const triggered = engine.notifyUserMessage(5100);
+    expect(triggered).toBe(true);
+    expect(engine.lastDownCheckAt).toBe(0);
+
+    // Now processHeartbeat should immediately send a probe
+    engine.processHeartbeat(true, 5101);
+    expect(phases).toContain('down-check');
+  });
+
+  it('ok state: no-op', () => {
+    const engine = new HeartbeatEngine(makeDeps());
+    expect(engine.health).toBe('ok');
+
+    const triggered = engine.notifyUserMessage(1000);
+    expect(triggered).toBe(false);
+  });
+
+  it('respects cooldown across all states', () => {
+    const engine = new HeartbeatEngine(makeDeps(), {
+      userMessageRecoveryCooldown: 300,
+    });
+
+    engine.triggerRecovery('fail');
+    expect(engine.health).toBe('recovering');
+
+    // First message triggers
+    expect(engine.notifyUserMessage(1000)).toBe(true);
+
+    // Second message within cooldown is rejected
+    expect(engine.notifyUserMessage(1200)).toBe(false);
+
+    // After cooldown, triggers again
+    expect(engine.notifyUserMessage(1301)).toBe(true);
+  });
+});
+
 describe('HeartbeatEngine — basic health transitions', () => {
   it('sends primary heartbeat when interval elapses', () => {
     const phases = [];

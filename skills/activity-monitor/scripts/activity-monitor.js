@@ -143,7 +143,7 @@ const DOWN_DEGRADE_THRESHOLD = 3600; // 1 hour of continuous failure → enter D
 const DOWN_RETRY_INTERVAL = 3600;    // 60 min periodic retry in DOWN state
 const SIGNAL_GRACE_PERIOD = 30;      // Wait 30s after claudeRunning transitions before probing
 const RATE_LIMIT_DEFAULT_COOLDOWN = 3600;  // 1 hour default when reset time can't be parsed
-const USER_MESSAGE_RECOVERY_COOLDOWN = 300; // 5 min between user-message-triggered recoveries
+const USER_MESSAGE_RECOVERY_COOLDOWN = 60; // 1 min between user-message-triggered recoveries
 
 // Stuck detection config
 const STUCK_THRESHOLD = 300;         // 5 min of no activity → trigger immediate probe
@@ -1586,9 +1586,9 @@ function monitorLoop() {
     }
   }
 
-  // User message triggered recovery: when a user sends a message during rate_limited,
-  // c4-receive writes a signal file. Read and consume it to trigger early recovery.
-  if (engine.health === 'rate_limited') {
+  // User message triggered recovery: when a user sends a message while unavailable,
+  // c4-receive writes a signal file. Read and consume it to trigger/accelerate recovery.
+  if (engine.health !== 'ok') {
     try {
       if (fs.existsSync(USER_MESSAGE_SIGNAL_FILE)) {
         const signal = JSON.parse(fs.readFileSync(USER_MESSAGE_SIGNAL_FILE, 'utf8'));
