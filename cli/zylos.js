@@ -20,6 +20,7 @@ import { initCommand } from './commands/init.js';
 import { configCommand } from './commands/config.js';
 import { attachCommand } from './commands/attach.js';
 import { doctorCommand } from './commands/doctor.js';
+import { shellCommand } from './commands/shell.js';
 
 const commands = {
   // Environment setup
@@ -27,6 +28,7 @@ const commands = {
   config: configCommand,
   attach: attachCommand,
   doctor: doctorCommand,
+  shell: shellCommand,
   // Service management
   status: showStatus,
   logs: showLogs,
@@ -89,6 +91,7 @@ Setup:
   attach              Attach to the Claude tmux session
   doctor              Diagnose and repair Zylos installation
                       --check   Diagnose only, no repairs
+  shell               Interactive CLI mode (REPL)
 
 Service Management:
   status              Show system status
@@ -117,6 +120,7 @@ Other:
   help                Show this help
 
 Examples:
+  zylos shell
   zylos init
   zylos config set protocol http
   zylos status
