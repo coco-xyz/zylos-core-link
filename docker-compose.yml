@@ -1,0 +1,80 @@
+# ────────────────────────────────────────────────────────────────────────────
+# Zylos — Docker Compose
+#
+# Quick start:
+#   1. Set environment variables below (or use a .env file in this directory)
+#   2. docker compose up -d
+#   3. docker compose logs -f
+#
+# Upgrading:
+#   docker compose pull && docker compose up -d
+# ────────────────────────────────────────────────────────────────────────────
+
+services:
+  zylos:
+    image: ghcr.io/zylos-ai/zylos-core:latest
+    # build: .   # Uncomment to build from source instead of pulling the image
+    container_name: zylos
+    restart: unless-stopped
+
+    # ── Authentication (required — choose ONE) ──────────────────────────────
+    environment:
+      # Option A: Claude Code OAuth token (Pro/Max subscription)
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Option B: Anthropic API key (usage-based billing)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      # ── Core config ───────────────────────────────────────────────────────
+      TZ: ${TZ:-UTC}
+      CLAUDE_BYPASS_PERMISSIONS: ${CLAUDE_BYPASS_PERMISSIONS:-true}
+
+      # ── Web console ─────────────────────────────────────────────────────────
+      # Bind to 0.0.0.0 inside container so ports are accessible from host
+      WEB_CONSOLE_BIND: "0.0.0.0"
+      ZYLOS_WEB_PASSWORD: ${ZYLOS_WEB_PASSWORD:-}
+
+      # ── Channel tokens (optional) ─────────────────────────────────────────
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      LARK_APP_ID: ${LARK_APP_ID:-}
+      LARK_APP_SECRET: ${LARK_APP_SECRET:-}
+
+    # ── Ports ────────────────────────────────────────────────────────────────
+    ports:
+      # Web console (default: 3456)
+      - "${WEB_CONSOLE_PORT:-3456}:3456"
+      # Caddy / reverse proxy (optional, set CADDY_ENABLED=true in .env)
+      - "${HTTP_PORT:-8080}:8080"
+
+    # ── Volumes ───────────────────────────────────────────────────────────────
+    volumes:
+      # Entire zylos workspace — persists .env, memory, components, logs, etc.
+      - zylos-data:/home/zylos/zylos
+
+      # Claude Code settings and auth tokens
+      - claude-config:/home/zylos/.claude
+
+      # Optional: mount your own .env instead of relying on environment block
+      # - ./zylos.env:/home/zylos/zylos/.env:ro
+
+    # ── Health ────────────────────────────────────────────────────────────────
+    healthcheck:
+      test: ["CMD", "pm2", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 600s
+
+    # ── Resources (optional, tune for your host) ──────────────────────────────
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 2g
+    #     reservations:
+    #       memory: 512m
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+volumes:
+  zylos-data:
+    driver: local
+  claude-config:
+    driver: local

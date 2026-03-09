@@ -122,6 +122,22 @@ zylos init
 </details>
 
 <details>
+<summary>Docker deployment</summary>
+
+```bash
+docker run -d --name zylos \
+  -e CLAUDE_CODE_OAUTH_TOKEN=YOUR_TOKEN_HERE \
+  -p 3456:3456 \
+  -v zylos-data:/home/zylos/zylos \
+  -v claude-config:/home/zylos/.claude \
+  ghcr.io/zylos-ai/zylos-core:latest
+```
+
+Open `http://localhost:3456` to access the web console. See the [Docker Deployment Guide](docs/docker.md) for Docker Compose setup, environment variables, Synology NAS instructions, and more.
+
+</details>
+
+<details>
 <summary>Unsupported platforms (Windows, NAS, etc.) — install via SSH</summary>
 
 On platforms without native support, use Claude Code's SSH feature to install Zylos on a remote Linux/macOS machine:

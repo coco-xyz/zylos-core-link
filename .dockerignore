@@ -1,0 +1,12 @@
+node_modules
+.git
+.github
+*.log
+*.env
+.env.*
+!.env.example
+test
+docs
+assets
+README*.md
+CHANGELOG.md
