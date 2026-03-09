@@ -1332,6 +1332,28 @@ async function handleRemoveFlow(target, { purge, skipConfirm, force, jsonOutput 
   // Execute removal, collect step results
   const steps = [];
 
+  // 0. Run pre-uninstall hook (before stopping service or removing files)
+  const skillMd = parseSkillMd(skillDir);
+  const hooks = skillMd?.frontmatter?.lifecycle?.hooks || {};
+  if (hooks['pre-uninstall']) {
+    const hookPath = path.resolve(skillDir, hooks['pre-uninstall']);
+    if (fs.existsSync(hookPath)) {
+      if (!jsonOutput) console.log(`  ${cyan('Running pre-uninstall hook...')}`);
+      try {
+        execFileSync('node', [hookPath], {
+          cwd: skillDir,
+          stdio: jsonOutput ? 'pipe' : 'inherit',
+          env: { ...process.env, ZYLOS_COMPONENT: target, ZYLOS_SKILL_DIR: skillDir, ZYLOS_DATA_DIR: dataDir },
+        });
+        steps.push({ action: 'Pre-uninstall hook complete', success: true });
+        if (!jsonOutput) console.log(`  ${success('Pre-uninstall hook complete.')}`);
+      } catch (err) {
+        steps.push({ action: 'Pre-uninstall hook failed', success: false, error: err.message });
+        if (!jsonOutput) console.log(`  ${warn('Pre-uninstall hook had issues (continuing anyway).')}`);
+      }
+    }
+  }
+
   // 1. Stop + delete PM2 service (use execFileSync to avoid shell injection)
   try {
     try { execFileSync('pm2', ['stop', serviceName], { stdio: 'pipe' }); } catch { /* ignore */ }

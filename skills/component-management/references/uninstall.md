@@ -16,15 +16,11 @@ Choose an option:
 2. Remove everything (code + data)
 ```
 
-### Step 2: Pre-Uninstall Cleanup
+### Step 2: Execute Uninstall
 
-Before executing CLI uninstall, check the component's SKILL.md for external resources that need cleanup:
-- Webhook registrations (deregister)
-- Active connections (close gracefully)
-- External service integrations (notify/cleanup)
-- **Shared PM2 services**: If the component manages PM2 services (e.g. zylos-xvfb, zylos-vnc), check whether any other installed component also uses them before stopping. Scan other components' SKILL.md files in `~/.claude/skills/` — only stop a service if no other component references it.
+The CLI automatically runs `pre-uninstall` hooks declared in SKILL.md before stopping services and removing files. Components use this hook to clean up runtime resources (PM2 processes, PID files, connections).
 
-### Step 3: Execute Uninstall
+If the hook fails, the CLI warns and continues with the uninstall.
 
 After user chooses:
 ```bash
@@ -35,7 +31,7 @@ zylos uninstall <component> --yes --json
 zylos uninstall <component> --purge --yes --json
 ```
 
-### Step 4: Clean Environment Variables
+### Step 3: Clean Environment Variables
 
 Remove the component's declared environment variables from `~/zylos/.env` to avoid stale credentials.
 
@@ -55,7 +51,6 @@ Run `zylos uninstall lark --check --json`. The JSON output includes component in
 
 User: `uninstall lark confirm` (keep data) or `uninstall lark purge` (delete all)
 
-1. Check SKILL.md for external cleanup needs (webhooks, connections, shared PM2 services)
-2. Run `zylos uninstall lark confirm --json` or `zylos uninstall lark purge --json`
+1. Run `zylos uninstall lark confirm --json` or `zylos uninstall lark purge --json` (CLI handles pre-uninstall hooks automatically)
 3. Clean component's environment variables from .env
 4. Reply with result
