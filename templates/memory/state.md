@@ -3,10 +3,13 @@
 Last updated: (not yet)
 
 ## Current Focus
-Fresh installation. No active tasks.
+Fresh installation. Onboarding pending.
+
+## Onboarding
+- Status: pending
 
 ## Pending Tasks
-None yet.
+- [ ] Complete onboarding — deliver security notice and guide owner through first project (see CLAUDE.md > Onboarding)
 
 ## Recent Completions
 None yet.
