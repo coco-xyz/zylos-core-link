@@ -140,6 +140,35 @@ module.exports = {
           kill_timeout: 5000,
         }]
       : []),
+    // Claude OAuth token refresh — runs every 6 hours to keep token alive
+    // Only active in container/Docker deployments where token refresh is needed.
+    ...(fs.existsSync('/opt/zylos/claude-token-refresh.sh')
+      ? [{
+          name: 'token-refresh',
+          script: '/opt/zylos/claude-token-refresh.sh',
+          interpreter: '/bin/bash',
+          cron_restart: '0 */6 * * *',
+          watch: false,
+          autorestart: false,
+          env: { PATH: ENHANCED_PATH }
+        }]
+      : []),
+    // Link channel — in-container HTTP bridge for agent API service message routing
+    // Only active when LINK_CHANNEL_ENABLED=true (set by API service during provisioning)
+    ...(readEnvValue('LINK_CHANNEL_ENABLED') === 'true'
+      ? [{
+          name: 'zylos-link',
+          script: path.join(SKILLS_DIR, 'link-channel', 'server.js'),
+          cwd: ZYLOS_DIR,
+          env: {
+            PATH: ENHANCED_PATH,
+            NODE_ENV: 'production',
+          },
+          autorestart: true,
+          max_restarts: 10,
+          min_uptime: '10s',
+        }]
+      : []),
     // Component services (telegram, lark, etc.) are managed by `zylos add/remove`
   ]
 };
