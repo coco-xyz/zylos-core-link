@@ -255,6 +255,22 @@ module.exports = {
           kill_timeout: 5000,
         }]
       : []),
+    // Link channel — in-container HTTP bridge for agent API service message routing
+    // Only active when LINK_CHANNEL_ENABLED=true (set by API service during provisioning)
+    ...(readEnvValue('LINK_CHANNEL_ENABLED') === 'true'
+      ? [{
+          name: 'zylos-link',
+          script: path.join(SKILLS_DIR, 'link-channel', 'server.js'),
+          cwd: ZYLOS_DIR,
+          env: {
+            PATH: ENHANCED_PATH,
+            NODE_ENV: 'production',
+          },
+          autorestart: true,
+          max_restarts: 10,
+          min_uptime: '10s',
+        }]
+      : []),
     // Component services — dynamically loaded from components.json
     ...loadComponentServices(),
   ]
