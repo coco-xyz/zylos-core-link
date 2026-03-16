@@ -112,6 +112,8 @@ upsert_env "CODEX_BYPASS_PERMISSIONS" "${CODEX_BYPASS_PERMISSIONS:-true}"
 # on subsequent restarts without relying on Docker's environment re-injection.
 upsert_env "OPENAI_API_KEY" "${OPENAI_API_KEY:-}"
 upsert_env "CODEX_API_KEY" "${CODEX_API_KEY:-}"
+# Link channel — in-container HTTP bridge for agent API service (port 4200)
+upsert_env "LINK_CHANNEL_ENABLED" "${LINK_CHANNEL_ENABLED:-}"
 
 # Save current PATH so PM2 services can find claude and node
 upsert_env "SYSTEM_PATH" "${PATH}"
