@@ -177,6 +177,12 @@ else
   if [ "${CLAUDE_BYPASS_PERMISSIONS:-true}" = "true" ]; then
     CLAUDE_ARGS="--dangerously-skip-permissions"
   fi
+  # Model selection — default to opus; override via CLAUDE_MODEL env var
+  CLAUDE_MODEL_ARG="${CLAUDE_MODEL:-opus}"
+  CLAUDE_ARGS="${CLAUDE_ARGS} --model ${CLAUDE_MODEL_ARG}"
+  # Effort level — default to high; override via CLAUDE_EFFORT env var
+  CLAUDE_EFFORT_ARG="${CLAUDE_EFFORT:-high}"
+  CLAUDE_ARGS="${CLAUDE_ARGS} --effort ${CLAUDE_EFFORT_ARG}"
 
   tmux new-session -d -s claude-main -x 220 -y 50 \
     "cd ${ZYLOS_DIR} && source ${ENV_FILE} 2>/dev/null; exec claude ${CLAUDE_ARGS}"
