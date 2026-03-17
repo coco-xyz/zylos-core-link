@@ -133,7 +133,7 @@ export class ClaudeAdapter extends RuntimeAdapter {
       return await this._httpValidateCredentials({ 'x-api-key': envApiKey });
     }
     if (envOauthToken) {
-      return await this._httpValidateCredentials({ 'Authorization': `Bearer ${envOauthToken}` });
+      return await this._httpValidateCredentials({ 'x-api-key': envOauthToken });
     }
 
     // Stage 3: Live CLI probe — `claude -p ping --max-turns 1`.
