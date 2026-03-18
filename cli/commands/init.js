@@ -2198,8 +2198,9 @@ export async function initCommand(args) {
     } // end if (commandExists('claude')) — Step 6
   } // end else (Claude runtime branch)
 
-  // Pre-accept Claude Code terms (skips manual prompts on first launch)
-  if (claudeAuthenticated) {
+  // Pre-accept Claude Code terms (skips manual prompts on first launch).
+  // Called regardless of auth state — user may configure credentials after init.
+  if (selectedRuntime === 'claude') {
     if (preAcceptClaudeTerms()) {
       if (!quiet) console.log(`  ${success('Claude Code terms pre-accepted')}`);
     }
