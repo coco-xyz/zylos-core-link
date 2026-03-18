@@ -2,11 +2,21 @@
 /**
  * Activity Monitor v26 - RuntimeAdapter (multi-runtime) + Guardian + Heartbeat v4 + Health Check + Daily Tasks + Upgrade Check + Usage Monitor + ProcSampler
  *
- * v26 changes (launch grace period):
+ * v27 changes (proactive API error scan):
+ *   - monitorLoop scans tmux pane every 15s for fatal API errors (400, invalid_request_error)
+ *     independently of heartbeat state — detects errors within 30s (2 consecutive scans)
+ *     instead of waiting for the next periodic probe (up to 3 min) + 30s fast-detection window
+ *   - Requires 2 consecutive detections to avoid false positives from conversation content
+ *   - On confirmed detection: adapter.stop() → Guardian auto-restarts with fresh context
+ *   - Skipped during launch grace period (same as periodic probes)
+ *
+ * v26 changes (launch grace period + stale heartbeat fix):
  *   - 3-minute grace period after agent launch: periodic heartbeat probes are skipped
  *     during this window to allow the new session to complete initialization (hooks,
  *     CLAUDE.md loading, session-start injection) before being expected to respond
  *   - Prevents false stuck_timeout kills on freshly launched sessions
+ *   - Clear stale heartbeat-pending.json in startAgent() before launch to prevent
+ *     old heartbeat timeout from pushing health to "recovering" after new session starts
  *
  * v25 changes (frozen process detection via /proc sampling):
  *   - New ProcSampler module: cross-platform context-switch sampling (Linux /proc, macOS top)
@@ -195,6 +205,7 @@ const USER_MESSAGE_RECOVERY_COOLDOWN = 60; // 1 min between user-message-trigger
 // the process is alive but functionally broken (e.g., stuck API errors, auth expired).
 const PERIODIC_PROBE_INTERVAL = 180; // 3 min — complementary to ProcSampler, not replaced by it
 const LAUNCH_GRACE_PERIOD = 180;     // 3 min — skip periodic probes after fresh launch to allow initialization
+const API_ERROR_SCAN_INTERVAL = 15;  // seconds between proactive tmux API error scans
 
 // Health check config
 const HEALTH_CHECK_INTERVAL = 21600; // 6 hours
@@ -241,6 +252,8 @@ let startupGrace = 0;
 let idleSince = 0;
 let lastPeriodicProbeAt = 0;
 let lastLaunchAt = 0;
+let lastApiErrorScanAt = 0;
+let apiErrorConsecutiveHits = 0;  // consecutive scans that detected an API error
 let lastDeadApiPid = null;
 let authFailedNotifiedAt = 0;
 let authRetrySuppressedUntil = 0;
@@ -1404,6 +1417,30 @@ async function monitorLoop() {
     if (!withinGracePeriod && activeTools === 0 && (currentTime - lastPeriodicProbeAt) >= PERIODIC_PROBE_INTERVAL) {
       const ok = engine.requestImmediateProbe('periodic_3min');
       if (ok) lastPeriodicProbeAt = currentTime;
+    }
+  }
+
+  // Proactive API error scan: detect fatal API errors (e.g. 400 from corrupted image)
+  // in the tmux pane independently of heartbeat state. Requires 2 consecutive detections
+  // (30s apart) to avoid false positives from conversation content mentioning API errors.
+  // Skipped during launch grace period (session still initializing).
+  if (engine.health === 'ok' && engine.deps.detectApiError) {
+    const withinGrace = lastLaunchAt > 0 && (currentTime - lastLaunchAt) < LAUNCH_GRACE_PERIOD;
+    if (!withinGrace && (currentTime - lastApiErrorScanAt) >= API_ERROR_SCAN_INTERVAL) {
+      lastApiErrorScanAt = currentTime;
+      const apiError = engine.deps.detectApiError();
+      if (apiError.detected) {
+        apiErrorConsecutiveHits++;
+        if (apiErrorConsecutiveHits >= 2) {
+          log(`Proactive API error scan: "${apiError.pattern}" detected ${apiErrorConsecutiveHits} consecutive times. Killing session for restart.`);
+          adapter.stop();
+          apiErrorConsecutiveHits = 0;
+        } else {
+          log(`Proactive API error scan: "${apiError.pattern}" detected (${apiErrorConsecutiveHits}/2, confirming on next scan)`);
+        }
+      } else {
+        apiErrorConsecutiveHits = 0;
+      }
     }
   }
 
