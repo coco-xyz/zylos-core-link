@@ -21,6 +21,7 @@ import {
   claimControl,
   requeueControl,
   retryOrFailControl,
+  ackControl,
   expireTimedOutControls,
   cleanupControlQueue
 } from './c4-db.js';
@@ -43,6 +44,8 @@ import {
   REQUIRE_IDLE_EXECUTION_POLL_MS,
   TMUX_SESSION,
   AGENT_STATUS_FILE,
+  PROC_STATE_FILE,
+  API_ACTIVITY_FILE,
   STALE_STATUS_THRESHOLD,
   TMUX_MISSING_WARN_THRESHOLD
 } from './c4-config.js';
@@ -94,6 +97,38 @@ function getAgentState() {
     log(`Warning: Error reading agent status (${err.message})`);
     // health is fail-open by design; state still degrades to offline on read failure.
     return { state: 'offline', health: 'ok', healthy: false, reason: 'error' };
+  }
+}
+
+/**
+ * Read proc-state.json written by the activity monitor's ProcSampler.
+ * Returns { alive, frozen, ... } or null if unavailable/stale (>30s).
+ */
+function readProcState() {
+  try {
+    if (!existsSync(PROC_STATE_FILE)) return null;
+    const data = JSON.parse(readFileSync(PROC_STATE_FILE, 'utf8'));
+    const age = nowSeconds() - (data.lastSampleAt || 0);
+    if (age > 30) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if agent is confirmed active: api-activity.json must show active_tools > 0
+ * AND be fresh (updated within 60s). Prevents stale hook state from gating auto-ack.
+ */
+function isAgentConfirmedActive() {
+  try {
+    if (!existsSync(API_ACTIVITY_FILE)) return false;
+    const data = JSON.parse(readFileSync(API_ACTIVITY_FILE, 'utf8'));
+    const updatedAt = data?.updated_at ? Math.floor(data.updated_at / 1000) : 0;
+    const age = nowSeconds() - updatedAt;
+    return (data?.active_tools ?? 0) > 0 && age < 60;
+  } catch {
+    return false;
   }
 }
 
@@ -178,7 +213,7 @@ async function submitAndVerify() {
     const state = checkInputBox(capture);
 
     if (state === 'empty') {
-      return;
+      return true;
     }
 
     if (state === 'indeterminate') {
@@ -190,6 +225,8 @@ async function submitAndVerify() {
     log(`Enter verify attempt ${attempt + 1}: input box has content, retrying Enter`);
     execFileSync('tmux', ['send-keys', '-t', TMUX_SESSION, 'Enter'], { stdio: 'pipe', timeout: 5000 });
   }
+
+  return false;
 }
 
 async function sendToTmux(message) {
@@ -214,10 +251,24 @@ async function sendToTmux(message) {
 
   await sleep(delayMs);
 
+  let verified = false;
   try {
-    await submitAndVerify();
+    verified = await submitAndVerify();
   } catch (err) {
-    log(`Warning: Enter verification error (paste already succeeded): ${err.message}`);
+    log(`Warning: Enter verification error: ${err.message}`);
+  }
+
+  // D2: If verification failed, check process state via ProcSampler.
+  // If process is confirmed dead (alive === false or frozen), the message was lost.
+  // If process is alive, the paste likely succeeded but verification timing was off.
+  if (!verified) {
+    const procState = readProcState();
+    const agentState = getAgentState();
+    if ((procState && procState.alive === false) ||
+        agentState.state === 'offline' || agentState.state === 'stopped') {
+      log('Verification failed and agent is dead/offline — marking as verify_failed');
+      return 'verify_failed';
+    }
   }
 
   return 'submitted';
@@ -377,6 +428,26 @@ async function processNextMessage() {
     return { delivered: false, state: agentState.state };
   }
 
+  // D1: heartbeat must not interrupt active generation.
+  // Auto-ack requires ALL four conditions:
+  //   1. It's a heartbeat (not other bypass controls like context rotation)
+  //   2. Agent state is not offline/stopped (proc-state can be stale for ~30s after crash)
+  //   3. /proc confirms process is alive (not just scheduled)
+  //   4. Agent is confirmed active with fresh hooks (active_tools > 0 + updated <60s)
+  // When idle (active_tools === 0) or hooks are stale, heartbeat is delivered as a
+  // real end-to-end probe to verify the agent can actually process messages.
+  if (bypass) {
+    const isHeartbeat = (item.content || '').includes('Heartbeat check');
+    const agentAlive = agentState.state !== 'offline' && agentState.state !== 'stopped';
+    const procState = readProcState();
+    const confirmed = isAgentConfirmedActive();
+    if (isHeartbeat && agentAlive && procState && procState.alive === true && confirmed) {
+      log(`Auto-acking heartbeat id=${item.id}: /proc alive + active_tools>0 fresh (delta=${procState.lastDelta})`);
+      ackControl(item.id);
+      return { delivered: true, state: agentState.state };
+    }
+  }
+
   log(`Delivering ${item.type} id=${item.id}${item.type === 'control' ? ` priority=${item.priority}` : ` from ${item.channel}`}`);
   const deliveryContent = item.content || '';
   const result = await sendToTmux(deliveryContent);
@@ -395,10 +466,11 @@ async function processNextMessage() {
     return { delivered: true, state: agentState.state };
   }
 
-  log(`Failed to paste ${item.type} id=${item.id} to tmux`);
-  logDeliveryFailure(item.type, item.id, 'TMUX_PASTE_FAILED');
+  const reason = result === 'verify_failed' ? 'VERIFY_FAILED' : 'TMUX_PASTE_FAILED';
+  log(`Failed to deliver ${item.type} id=${item.id} to tmux (${reason})`);
+  logDeliveryFailure(item.type, item.id, reason);
   if (item.type === 'control') {
-    await handleControlDeliveryFailure(item, 'TMUX_PASTE_FAILED');
+    await handleControlDeliveryFailure(item, reason);
   } else {
     await handleConversationDeliveryFailure(item);
   }

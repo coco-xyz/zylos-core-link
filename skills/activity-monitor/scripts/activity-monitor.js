@@ -1,6 +1,14 @@
 #!/usr/bin/env node
 /**
- * Activity Monitor v24 - RuntimeAdapter (multi-runtime) + Guardian + Heartbeat v4 + Health Check + Daily Tasks + Upgrade Check + Usage Monitor
+ * Activity Monitor v25 - RuntimeAdapter (multi-runtime) + Guardian + Heartbeat v4 + Health Check + Daily Tasks + Upgrade Check + Usage Monitor + ProcSampler
+ *
+ * v25 changes (frozen process detection via /proc sampling):
+ *   - New ProcSampler module: cross-platform context-switch sampling (Linux /proc, macOS top)
+ *   - Detects frozen processes in 60s (6 samples × 10s interval) — independent of heartbeat
+ *   - On frozen detection: adapter.stop() → Guardian auto-restarts on next loop
+ *   - Heartbeat periodic probe interval increased from 3 min to 30 min (safety-net only)
+ *   - proc-state.json written atomically for dispatcher to read
+ *   - Dispatcher uses proc state for heartbeat auto-ack and verify_failed detection
  *
  * v24 changes (service recovery — auth retry backoff):
  *   - Auth failure now suppresses restart attempts for 3 minutes (authRetrySuppressedUntil)
@@ -107,6 +115,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { HeartbeatEngine } from './heartbeat-engine.js';
 import { DailySchedule } from './daily-schedule.js';
+import { ProcSampler } from './proc-sampler.js';
 // activity-monitor runs as a deployed skill at ~/zylos/.claude/skills/activity-monitor/scripts/.
 // A relative import to cli/lib/runtime/ resolves correctly in the repo (dev) but NOT from
 // the deployed path — the CLI lives in the globally installed zylos npm package.
@@ -175,8 +184,10 @@ const SIGNAL_GRACE_PERIOD = 30;      // Wait 30s after agentRunning transitions 
 const RATE_LIMIT_DEFAULT_COOLDOWN = 3600;  // 1 hour default when reset time can't be parsed
 const USER_MESSAGE_RECOVERY_COOLDOWN = 60; // 1 min between user-message-triggered recoveries
 
-// Periodic probe config (replaces stuck detection)
-const PERIODIC_PROBE_INTERVAL = 180; // 3 min fixed-interval probe when agent is idle
+// Periodic probe config — kept at 3 min for end-to-end health verification.
+// ProcSampler handles frozen-process detection, but periodic probe catches cases where
+// the process is alive but functionally broken (e.g., stuck API errors, auth expired).
+const PERIODIC_PROBE_INTERVAL = 180; // 3 min — complementary to ProcSampler, not replaced by it
 
 // Health check config
 const HEALTH_CHECK_INTERVAL = 21600; // 6 hours
@@ -230,6 +241,7 @@ let startAgentInProgress = false;
 let adapter;         // initialized in init() via getActiveAdapter()
 let engine;          // initialized in init()
 let contextMonitor;  // initialized in init() if adapter provides one (Codex only)
+let procSampler;     // initialized in init()
 
 // Usage monitoring state machine: 'idle' → 'sent' → 'waiting' → 'capture' → 'idle'
 let usageCheckPhase = 'idle';
@@ -1292,6 +1304,25 @@ async function monitorLoop() {
   const activeTools = apiActivity?.active_tools ?? 0;
   const thinking = apiActivity?.active === true || activeTools > 0;
 
+  // Hook freshness: if api-activity.json hasn't been updated in 60s, treat active_tools
+  // as stale. Prevents stale hook state from driving destructive ProcSampler restarts
+  // and also gates heartbeat auto-ack in the dispatcher (via proc-state.json).
+  const hookFresh = apiUpdatedSec > 0 && (currentTime - apiUpdatedSec) < 60;
+  const confirmedActive = activeTools > 0 && hookFresh;
+
+  // /proc context-switch sampling: tick every loop iteration (internally gated to 10s).
+  // Only counts frozen time when agent has confirmed active tools (fresh hook + active_tools > 0),
+  // since an idle agent naturally has zero context switches.
+  procSampler.tick(currentTime, { isActive: confirmedActive });
+  if (procSampler.isFrozen()) {
+    log(`Guardian: Process frozen (0 ctx_switch delta for ${procSampler.getState().frozenCount}s while active_tools > 0), killing session`);
+    adapter.stop();
+    procSampler.reset();
+    // Guardian will detect offline on next tick and call startAgent().
+    lastState = 'frozen';
+    return;
+  }
+
   // Merge activity sources: use API timestamp when it indicates active work
   // (PreToolUse/UserPromptSubmit set active=true). Don't extend activity on
   // Stop/Notification events (active=false) — those signal idle, not work.
@@ -1347,12 +1378,12 @@ async function monitorLoop() {
     maybeConsumeUserMessageSignal(currentTime);
   }
 
-  // Periodic probe: fixed 5-min interval, skipped when agent is busy (active_tools > 0).
-  // Replaces indirect-signal stuck detection. Catches auth failures and frozen-but-alive
-  // agents regardless of whether activity signals are being refreshed.
+  // Periodic probe: 3-min end-to-end health check. Complementary to ProcSampler:
+  // ProcSampler detects frozen processes, periodic probe catches functional failures
+  // (API errors, auth expired, stuck prompts) where the process is alive but broken.
   if (engine.health === 'ok') {
     if (activeTools === 0 && (currentTime - lastPeriodicProbeAt) >= PERIODIC_PROBE_INTERVAL) {
-      const ok = engine.requestImmediateProbe('periodic_5min');
+      const ok = engine.requestImmediateProbe('periodic_3min');
       if (ok) lastPeriodicProbeAt = currentTime;
     }
   }
@@ -1393,12 +1424,21 @@ function _readMemorySnapshot() {
 }
 
 function init() {
+  // Strip stale TMUX env var — PM2 dump can carry over the old tmux session
+  // reference from before a reboot, causing child tmux commands to fail with
+  // "error creating /tmp/tmux-<uid>/default (No such file or directory)".
+  delete process.env.TMUX;
+
   if (!fs.existsSync(MONITOR_DIR)) {
     fs.mkdirSync(MONITOR_DIR, { recursive: true });
   }
 
   // Load the active runtime adapter (claude or codex, from config.json)
   adapter = getActiveAdapter();
+
+  // Initialize ProcSampler for frozen-process detection via context-switch sampling.
+  // sessionName comes from the adapter (claude-main or codex-main).
+  procSampler = new ProcSampler({ sessionName: adapter.sessionName, log });
 
   const initialStatus = loadInitialHealth();
   const initialHealth = initialStatus.health;
@@ -1542,7 +1582,7 @@ try {
   console.error(`[activity-monitor] Fatal: init() failed: ${err.message}`);
   process.exit(1);
 }
-log(`=== Activity Monitor Started (v23 - RuntimeAdapter: ${adapter.displayName} | Guardian + Heartbeat v4 + PeriodicProbe + LiveAuth + DailyTasks + UpgradeCheck + UsageMonitor): ${new Date().toISOString()} tz=${timezone} ===`);
+log(`=== Activity Monitor Started (v25 - RuntimeAdapter: ${adapter.displayName} | Guardian + Heartbeat v4 + ProcSampler + LiveAuth + DailyTasks + UpgradeCheck + UsageMonitor): ${new Date().toISOString()} tz=${timezone} ===`);
 
 // Use self-scheduling loop instead of setInterval to prevent concurrent
 // invocations: async monitorLoop + setInterval can overlap if isRunning()
