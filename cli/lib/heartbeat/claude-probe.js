@@ -2,7 +2,7 @@
  * claude-probe.js — HeartbeatEngine probe for Claude Code runtime.
  *
  * Implements the runtime-specific deps subset for HeartbeatEngine:
- *   enqueueHeartbeat, getHeartbeatStatus, detectRateLimit,
+ *   enqueueHeartbeat, getHeartbeatStatus, detectRateLimit, detectApiError,
  *   readHeartbeatPending, clearHeartbeatPending
  *
  * Mechanism:
@@ -10,6 +10,8 @@
  *     Claude Code's ACK (via c4-control.js ack --id <id>) marks it done.
  *   - getHeartbeatStatus: queries C4 control for the message status.
  *   - detectRateLimit: captures the tmux pane and matches Anthropic usage-limit UI patterns.
+ *   - detectApiError: captures the tmux pane and matches Anthropic API error patterns (e.g. 400).
+ *     Used for fast recovery when API errors cause the session to become unresponsive.
  *
  * Usage:
  *   const probe = createClaudeProbe({ pendingFile, tmuxSession });
@@ -29,6 +31,17 @@ const RATE_LIMIT_PATTERNS = [
   /you['']re out of .* usage/i,
   /usage limit reached/i,
   /you['']ve hit your limit/i,
+];
+
+// Anthropic API error patterns — matched against tmux pane content to detect
+// fatal API errors (e.g. 400 from a corrupted image) that leave Claude Code
+// unresponsive. These patterns are specific to Claude Code's error display
+// to avoid false positives from conversation content containing "400".
+const API_ERROR_PATTERNS = [
+  /APIError:\s*\d{3}/,                                    // "APIError: 400 ..."
+  /\b(400|422)\b.*(?:bad request|invalid request)/i,      // "400 Bad Request"
+  /invalid_request_error/,                                 // Anthropic error type
+  /overloaded_error/,                                      // Anthropic overloaded
 ];
 
 /**
@@ -126,6 +139,27 @@ export function createClaudeProbe({
       }
 
       return { detected: true, cooldownUntil, resetTime };
+    },
+
+    /**
+     * Detect Anthropic API errors (e.g. 400 from corrupted image) in the tmux pane.
+     * Used for fast recovery: when a heartbeat is pending and the session appears
+     * stuck, this check can trigger immediate recovery instead of waiting for the
+     * full ack_deadline timeout.
+     *
+     * @returns {{ detected: boolean, pattern?: string }}
+     */
+    detectApiError() {
+      const pane = _captureTmuxPane(tmuxSession);
+      if (!pane) return { detected: false };
+
+      for (const p of API_ERROR_PATTERNS) {
+        const match = pane.match(p);
+        if (match) {
+          return { detected: true, pattern: match[0] };
+        }
+      }
+      return { detected: false };
     },
 
     // ── Pending state management ─────────────────────────────────────────────

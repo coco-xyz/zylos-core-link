@@ -39,6 +39,7 @@ export class HeartbeatEngine {
    * @param {() => void} deps.notifyPendingChannels
    * @param {(message: string) => void} deps.log
    * @param {() => {detected: boolean, cooldownUntil?: number, resetTime?: string}} [deps.detectRateLimit]
+   * @param {() => {detected: boolean, pattern?: string}} [deps.detectApiError]
    * @param {object} [options]
    * @param {number} [options.heartbeatInterval=1800]
    * @param {number} [options.downDegradeThreshold=3600] - Seconds of continuous failure before entering DOWN
@@ -75,6 +76,9 @@ export class HeartbeatEngine {
     this.cooldownUntil = 0; // Epoch seconds when rate limit cooldown expires
     this.rateLimitResetTime = ''; // Human-readable reset time for display
     this.lastUserMessageRecoveryAt = 0; // Last time user message triggered early recovery
+
+    // API error detection throttle
+    this._lastApiErrorScanAt = 0; // Last time tmux pane was scanned for API errors
   }
 
   get health() {
@@ -192,6 +196,20 @@ export class HeartbeatEngine {
       const pendingAge = currentTime - (pending.created_at || 0);
       const maxPendingAge = 600; // 10 min absolute ceiling
       if ((status === 'pending' || status === 'running' || status === 'error') && pendingAge < maxPendingAge) {
+        // API error fast-detection: when a heartbeat has been pending for >30s,
+        // periodically scan the tmux pane for fatal API errors (e.g. 400 from
+        // corrupted image). Triggers immediate recovery instead of waiting for
+        // the full ack_deadline timeout (120s). Scans at most once per 15s.
+        if (pendingAge > 30 && this.deps.detectApiError
+            && (currentTime - this._lastApiErrorScanAt) >= 15) {
+          this._lastApiErrorScanAt = currentTime;
+          const apiError = this.deps.detectApiError();
+          if (apiError.detected) {
+            this.deps.log(`API error detected in tmux pane: ${apiError.pattern}. Triggering immediate recovery.`);
+            this.onHeartbeatFailure(pending, 'api_error');
+            return;
+          }
+        }
         return;
       }
       if (pendingAge >= maxPendingAge && status !== 'done') {

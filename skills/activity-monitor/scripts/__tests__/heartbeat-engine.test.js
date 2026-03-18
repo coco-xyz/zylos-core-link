@@ -914,4 +914,86 @@ describe('HeartbeatEngine', () => {
       assert.equal(engine.health, 'down');
     });
   });
+
+  describe('API error fast-detection', () => {
+    it('triggers recovery when API error detected and pending age > 30s', () => {
+      const { deps, calls } = createMockDeps();
+      const now = Math.floor(Date.now() / 1000);
+      deps._pending = { control_id: 1, phase: 'stuck', created_at: now - 40 };
+      deps._heartbeatStatus = 'pending';
+      deps.detectApiError = () => ({ detected: true, pattern: 'APIError: 400' });
+      const engine = new HeartbeatEngine(deps);
+
+      engine.processHeartbeat(true, now);
+
+      assert.equal(calls.killTmuxSession, 1);
+      assert.equal(engine.health, 'recovering');
+      assert.ok(calls.log.some(m => m.includes('API error detected') && m.includes('APIError: 400')));
+    });
+
+    it('does not scan when pending age < 30s', () => {
+      let scanCalled = false;
+      const { deps, calls } = createMockDeps();
+      const now = Math.floor(Date.now() / 1000);
+      deps._pending = { control_id: 1, phase: 'stuck', created_at: now - 10 };
+      deps._heartbeatStatus = 'pending';
+      deps.detectApiError = () => { scanCalled = true; return { detected: false }; };
+      const engine = new HeartbeatEngine(deps);
+
+      engine.processHeartbeat(true, now);
+
+      assert.equal(scanCalled, false);
+      assert.equal(calls.killTmuxSession, 0);
+    });
+
+    it('throttles scans to once per 15 seconds', () => {
+      let scanCount = 0;
+      const { deps } = createMockDeps();
+      const now = Math.floor(Date.now() / 1000);
+      deps._pending = { control_id: 1, phase: 'stuck', created_at: now - 50 };
+      deps._heartbeatStatus = 'pending';
+      deps.detectApiError = () => { scanCount++; return { detected: false }; };
+      const engine = new HeartbeatEngine(deps);
+
+      // First call: should scan
+      engine.processHeartbeat(true, now);
+      assert.equal(scanCount, 1);
+
+      // Second call 5 seconds later: should NOT scan (throttled)
+      engine.processHeartbeat(true, now + 5);
+      assert.equal(scanCount, 1);
+
+      // Third call 16 seconds later: should scan again
+      engine.processHeartbeat(true, now + 16);
+      assert.equal(scanCount, 2);
+    });
+
+    it('does not scan when detectApiError dep is absent', () => {
+      const { deps, calls } = createMockDeps();
+      const now = Math.floor(Date.now() / 1000);
+      deps._pending = { control_id: 1, phase: 'stuck', created_at: now - 40 };
+      deps._heartbeatStatus = 'pending';
+      // No detectApiError dep
+      const engine = new HeartbeatEngine(deps);
+
+      engine.processHeartbeat(true, now);
+
+      assert.equal(calls.killTmuxSession, 0);
+      assert.equal(engine.health, 'ok');
+    });
+
+    it('does not trigger when no API error detected', () => {
+      const { deps, calls } = createMockDeps();
+      const now = Math.floor(Date.now() / 1000);
+      deps._pending = { control_id: 1, phase: 'stuck', created_at: now - 40 };
+      deps._heartbeatStatus = 'pending';
+      deps.detectApiError = () => ({ detected: false });
+      const engine = new HeartbeatEngine(deps);
+
+      engine.processHeartbeat(true, now);
+
+      assert.equal(calls.killTmuxSession, 0);
+      assert.equal(engine.health, 'ok');
+    });
+  });
 });
