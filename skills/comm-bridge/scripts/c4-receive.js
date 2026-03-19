@@ -213,6 +213,8 @@ function main() {
     } else if (status.health === 'rate_limited') {
       const resetInfo = status.rate_limit_reset ? ` I should be back around ${status.rate_limit_reset}.` : ' I should be back within an hour.';
       emitError(json, 'HEALTH_RATE_LIMITED', `I've hit my usage limit.${resetInfo} Please send your message again after I'm back!`);
+    } else if (status.health === 'auth_failed') {
+      emitError(json, 'HEALTH_AUTH_FAILED', "I'm having authentication issues — please check the API credentials. Your message has been queued and I'll process it once authentication is restored.");
     } else {
       emitError(json, 'HEALTH_RECOVERING', "I'm temporarily unavailable but should be back shortly. Please try again in a moment!");
     }

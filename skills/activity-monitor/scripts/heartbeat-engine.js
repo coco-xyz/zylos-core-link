@@ -162,6 +162,11 @@ export class HeartbeatEngine {
 
     this.lastUserMessageRecoveryAt = currentTime;
 
+    if (this.healthState === 'auth_failed') {
+      this.deps.log('User message received during auth failure — triggering immediate retry');
+      return true;
+    }
+
     if (this.healthState === 'rate_limited') {
       this.deps.log('User message triggered rate-limit recovery attempt');
       this.cooldownUntil = 0;
@@ -254,8 +259,8 @@ export class HeartbeatEngine {
 
     // Process signal acceleration: agentRunning just transitioned false→true,
     // grace period elapsed — send immediate heartbeat to verify recovery.
-    // Works in recovering and down states.
-    if ((this.healthState === 'recovering' || this.healthState === 'down') && this._shouldAccelerate(currentTime)) {
+    // Works in recovering, down, and auth_failed states.
+    if ((this.healthState === 'recovering' || this.healthState === 'down' || this.healthState === 'auth_failed') && this._shouldAccelerate(currentTime)) {
       this.deps.log(`Process signal acceleration: Agent restarted (health=${this.healthState}), verifying immediately`);
       this.signalDetectedAt = 0; // Consume the signal
       const phase = this.healthState === 'down' ? 'signal-down-check' : 'signal-recovery';
@@ -418,7 +423,7 @@ export class HeartbeatEngine {
     this.lastAgentRunning = agentRunning;
 
     // Detect false→true transition (skip null→true on first tick)
-    if (prev === false && agentRunning === true && (this.healthState === 'recovering' || this.healthState === 'down')) {
+    if (prev === false && agentRunning === true && (this.healthState === 'recovering' || this.healthState === 'down' || this.healthState === 'auth_failed')) {
       this.signalDetectedAt = currentTime;
       this.deps.log(`Process signal: agentRunning false→true, grace period ${this.signalGracePeriod}s`);
     }

@@ -482,6 +482,7 @@ async function startAgent() {
     if (!authResult.ok) {
       log(`Guardian: auth failed (${authResult.reason ?? 'unknown'}), skipping restart. Next retry in 3 min.`);
       authRetrySuppressedUntil = Date.now() + 180_000;
+      engine.setHealth('auth_failed', authResult.reason ?? 'unknown');
       const now = Math.floor(Date.now() / 1000);
       if ((now - authFailedNotifiedAt) > 3600) {
         authFailedNotifiedAt = now;
