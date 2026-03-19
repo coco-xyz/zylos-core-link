@@ -5,6 +5,20 @@ All notable changes to zylos-core will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-03-20
+
+### Added
+- **Beta version upgrades (`--beta` flag)**: `zylos upgrade --self --beta` and `zylos upgrade <component> --beta` now check for prerelease versions. Without `--beta`, only stable releases are shown — default behavior unchanged (#368)
+- **Tag-based version detection for zylos-core**: self-upgrade now uses GitHub tags (unified with component upgrades) instead of reading `package.json` from the main branch (#368)
+
+### Fixed
+- **Downgrade suggestion when on beta**: `hasUpdate` now uses semver directional comparison instead of string inequality, preventing false "update available" when the user is on a higher beta version than the latest stable (e.g. 0.6.0-beta.1 → 0.5.0) (#368)
+- **Chinese example messages in templates**: all example messages in `claude-addon.md`, `codex-addon.md`, and `ZYLOS.md` are now in English — the bot adapts to the user's language at runtime (#369)
+- **Onboarding security copy**: refined security disclosure for cloud deployment scenarios (#364)
+
+### Changed
+- **Version query instructions**: added `zylos --version` and `zylos upgrade --self --check` guidance to ZYLOS.md and component-management SKILL.md (#365)
+
 ## [0.4.1] - 2026-03-19
 
 ### Added
