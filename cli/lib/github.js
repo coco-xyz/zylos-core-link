@@ -118,16 +118,20 @@ export function compareSemverDesc(a, b) {
   return 0;
 }
 
-function parseTagsResponse(jsonStr) {
+function parseTagsResponse(jsonStr, { includePrerelease = false } = {}) {
   const tags = JSON.parse(jsonStr);
   if (!Array.isArray(tags) || tags.length === 0) return null;
 
-  const versions = tags
+  let versions = tags
     .map(t => t.name)
     .filter(name => /^v?\d+\.\d+\.\d+/.test(name))
-    .map(name => name.replace(/^v/, ''))
-    .sort(compareSemverDesc);
+    .map(name => name.replace(/^v/, ''));
 
+  if (!includePrerelease) {
+    versions = versions.filter(v => !v.includes('-'));
+  }
+
+  versions.sort(compareSemverDesc);
   return versions[0] || null;
 }
 
@@ -179,12 +183,14 @@ async function fetchTagsJsonAsync(repo) {
  * Looks for tags matching v*.*.* pattern and returns the highest semver.
  *
  * @param {string} repo - GitHub repo in "org/name" format
+ * @param {object} [opts]
+ * @param {boolean} [opts.includePrerelease=false] - Include prerelease (beta) tags
  * @returns {string|null} Latest version (without 'v' prefix) or null if no matching tags
  * @throws {Error} On network/API failures (callers should catch and handle)
  */
-export function fetchLatestTag(repo) {
+export function fetchLatestTag(repo, { includePrerelease = false } = {}) {
   try {
-    return parseTagsResponse(fetchTagsJsonSync(repo));
+    return parseTagsResponse(fetchTagsJsonSync(repo), { includePrerelease });
   } catch (err) {
     const msg = err.stderr?.toString().trim() || err.message || 'unknown error';
     throw new Error(`Failed to fetch tags for ${repo}: ${sanitizeError(msg)}`);
@@ -197,12 +203,14 @@ export function fetchLatestTag(repo) {
  * suitable for concurrent version checks.
  *
  * @param {string} repo - GitHub repo in "org/name" format
+ * @param {object} [opts]
+ * @param {boolean} [opts.includePrerelease=false] - Include prerelease (beta) tags
  * @returns {Promise<string|null>} Latest version (without 'v' prefix) or null
  * @throws {Error} On network/API failures
  */
-export async function fetchLatestTagAsync(repo) {
+export async function fetchLatestTagAsync(repo, { includePrerelease = false } = {}) {
   try {
-    return parseTagsResponse(await fetchTagsJsonAsync(repo));
+    return parseTagsResponse(await fetchTagsJsonAsync(repo), { includePrerelease });
   } catch (err) {
     const msg = err.stderr?.toString().trim() || err.message || 'unknown error';
     throw new Error(`Failed to fetch tags for ${repo}: ${sanitizeError(msg)}`);

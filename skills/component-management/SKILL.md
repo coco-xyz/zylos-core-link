@@ -46,6 +46,9 @@ zylos status
 # Check for zylos-core updates
 zylos upgrade --self --check
 
+# Check for beta/prerelease updates
+zylos upgrade --self --check --beta
+
 # Check all components for updates
 zylos upgrade --all --check
 ```
@@ -104,10 +107,14 @@ All `--json` outputs include structured data and a `reply` field (pre-formatted 
 | check \<name\> | `zylos upgrade <name> --check --json` |
 | upgrade \<name\> | `zylos upgrade <name> --check --json` **(CHECK ONLY)** |
 | upgrade \<name\> confirm | `zylos upgrade <name> --yes --skip-eval --json --temp-dir <tempDir>` |
+| upgrade \<name\> beta | `zylos upgrade <name> --check --beta --json` **(CHECK ONLY)** |
+| upgrade \<name\> beta confirm | `zylos upgrade <name> --yes --skip-eval --beta --json --temp-dir <tempDir>` |
 | add \<name\> | `zylos add <name> --check --json` **(CHECK ONLY)** |
 | add \<name\> confirm | `zylos add <name> --json` |
 | upgrade zylos | `zylos upgrade --self --check --json` **(CHECK ONLY)** |
 | upgrade zylos confirm | `zylos upgrade --self --yes --json --temp-dir <tempDir>` |
+| upgrade zylos beta | `zylos upgrade --self --check --beta --json` **(CHECK ONLY)** |
+| upgrade zylos beta confirm | `zylos upgrade --self --yes --beta --json --temp-dir <tempDir>` |
 | uninstall \<name\> | `zylos uninstall <name> --check --json` **(CHECK ONLY)** |
 | uninstall \<name\> confirm | `zylos uninstall <name> confirm --json` |
 | uninstall \<name\> purge | `zylos uninstall <name> purge --json` |

@@ -298,6 +298,8 @@ zylos status                  # Check running services
 zylos logs [service]          # View service logs
 zylos add <component>         # Install a channel or capability
 zylos upgrade <component>     # Upgrade a component
+zylos upgrade --self          # Upgrade zylos-core itself
+zylos upgrade --self --beta   # Check for beta/prerelease versions
 zylos uninstall --self        # Uninstall zylos entirely
 zylos list                    # List installed components
 zylos search [keyword]        # Search component registry

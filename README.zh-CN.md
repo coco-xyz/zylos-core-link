@@ -297,6 +297,8 @@ zylos status                  # 查看运行中的服务
 zylos logs [service]          # 查看服务日志
 zylos add <component>         # 安装通道或能力组件
 zylos upgrade <component>     # 升级组件
+zylos upgrade --self          # 升级 zylos-core 本体
+zylos upgrade --self --beta   # 检查 beta/预发布版本
 zylos uninstall --self        # 完全卸载 zylos
 zylos list                    # 列出已安装组件
 zylos search [keyword]        # 搜索组件注册表

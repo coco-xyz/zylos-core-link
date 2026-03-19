@@ -14,7 +14,7 @@ import { loadLocalRegistry } from './registry.js';
 import { parseSkillMd } from './skill.js';
 import { generateManifest, saveManifest } from './manifest.js';
 import { downloadArchive, downloadBranch } from './download.js';
-import { fetchLatestTag, fetchRawFile, sanitizeError } from './github.js';
+import { fetchLatestTag, fetchRawFile, compareSemverDesc, sanitizeError } from './github.js';
 import { copyTree, syncTree } from './fs-utils.js';
 import { applyCaddyRoutes } from './caddy.js';
 import { smartSync, formatMergeResult } from './smart-merge.js';
@@ -59,13 +59,18 @@ export function getRepo(component) {
 /**
  * Get the latest version from GitHub (latest tag).
  * Falls back to fetching SKILL.md from GitHub if no tags found.
+ *
+ * @param {string} component
+ * @param {string} repo
+ * @param {object} [opts]
+ * @param {boolean} [opts.beta=false] - Include prerelease (beta) tags
  */
-function getLatestVersion(component, repo) {
+function getLatestVersion(component, repo, { beta = false } = {}) {
   if (!repo) return { success: false, error: 'No repo configured for component' };
 
   // Primary: fetch latest tag from GitHub
   try {
-    const tagVersion = fetchLatestTag(repo);
+    const tagVersion = fetchLatestTag(repo, { includePrerelease: beta });
     if (tagVersion) {
       return { success: true, version: tagVersion };
     }
@@ -73,20 +78,24 @@ function getLatestVersion(component, repo) {
     // Network/API error — fall through to SKILL.md fallback
   }
 
-  // Fallback: fetch raw SKILL.md from GitHub
-  try {
-    const content = fetchRawFile(repo, 'SKILL.md');
-    const match = content.match(/^---\n([\s\S]*?)\n---/);
-    if (match) {
-      const versionMatch = match[1].match(/^version:\s*(.+)$/m);
-      if (versionMatch) {
-        return { success: true, version: versionMatch[1].trim() };
+  // Fallback: fetch raw SKILL.md from GitHub (only for non-beta, as SKILL.md has no prerelease info)
+  if (!beta) {
+    try {
+      const content = fetchRawFile(repo, 'SKILL.md');
+      const match = content.match(/^---\n([\s\S]*?)\n---/);
+      if (match) {
+        const versionMatch = match[1].match(/^version:\s*(.+)$/m);
+        if (versionMatch) {
+          return { success: true, version: versionMatch[1].trim() };
+        }
       }
+      return { success: false, error: 'Version not found in remote SKILL.md' };
+    } catch (err) {
+      return { success: false, error: `Cannot fetch remote: ${sanitizeError(err.message)}` };
     }
-    return { success: false, error: 'Version not found in remote SKILL.md' };
-  } catch (err) {
-    return { success: false, error: `Cannot fetch remote: ${sanitizeError(err.message)}` };
   }
+
+  return { success: false, error: 'No release tags found' };
 }
 
 // ---------------------------------------------------------------------------
@@ -98,9 +107,11 @@ function getLatestVersion(component, repo) {
  * Uses registry lookup (fast, no HTTP) with fallback to GitHub raw SKILL.md.
  *
  * @param {string} component
+ * @param {object} [opts]
+ * @param {boolean} [opts.beta=false] - Include prerelease (beta) versions
  * @returns {object} { success, hasUpdate, current, latest, repo }
  */
-export function checkForUpdates(component) {
+export function checkForUpdates(component, { beta = false } = {}) {
   const skillDir = path.join(SKILLS_DIR, component);
 
   if (!fs.existsSync(skillDir)) {
@@ -121,7 +132,7 @@ export function checkForUpdates(component) {
   }
 
   const repo = getRepo(component);
-  const latest = getLatestVersion(component, repo);
+  const latest = getLatestVersion(component, repo, { beta });
   if (!latest.success) {
     return {
       success: false,
@@ -130,7 +141,9 @@ export function checkForUpdates(component) {
     };
   }
 
-  const hasUpdate = localVersion.version !== latest.version;
+  // Use semver comparison (not string inequality) to avoid suggesting downgrades.
+  // compareSemverDesc(a, b) > 0 means b is higher than a.
+  const hasUpdate = compareSemverDesc(localVersion.version, latest.version) > 0;
 
   return {
     success: true,
