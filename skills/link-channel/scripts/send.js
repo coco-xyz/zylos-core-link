@@ -47,8 +47,8 @@ try {
 const agentId = meta.agentId || process.env.AGENT_ID || null;
 const conversationId = meta.conversationId || null;
 
-// Clean up pending file
-try { fs.unlinkSync(pendingPath); } catch { /* already gone */ }
+// Keep pending file — Claude may send multiple replies for the same request
+// (e.g., "researching..." then final answer). Cleanup happens via periodic sweep.
 
 if (!CALLBACK_URL) {
   // Fallback: write response to file (legacy mode for local dev)
