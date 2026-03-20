@@ -300,7 +300,6 @@ Zylos 全面兼容 [OpenClaw](https://github.com/openclaw/openclaw) 生态。Zyl
 | 浏览器自动化 | [zylos-browser](https://github.com/zylos-ai/zylos-browser) | ✅ 已有 |
 | 定时任务 / Webhooks | 调度器（Cron、自然语言输入、空闲门控） | ✅ 已有 |
 | 语音管道 | Telegram / 飞书语音转文字 | ✅ 已有 |
-| Gateway 搜索 | 组件搜索 | 🔄 进行中 |
 
 ### OpenClaw 用户
 
