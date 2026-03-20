@@ -1,9 +1,9 @@
 ---
 name: link-channel
 description: >-
-  HxA Link channel — receives messages from the Agent API Service and routes them to Claude
-  via C4 queue, then returns Claude's response. Runs as an HTTP service on port 4200 inside
-  agent containers. This is the in-container counterpart to the API Service's container routing.
+  HxA Link channel — receives messages from the Agent API Service, queues them for Claude
+  processing, and delivers responses asynchronously via callback to hxa-link. Runs as an HTTP
+  service on port 4200 inside agent containers. Same async pattern as zylos-lark.
   Use when: troubleshooting agent message delivery, checking link-channel status, or understanding
   the in-container message flow.
 ---
@@ -12,14 +12,16 @@ description: >-
 
 In-container HTTP service that bridges the Agent API Service and Claude Code.
 
-## Architecture
+## Architecture (Async Mode)
 
 ```
-API Service (external)
+API Service (hxa-link)
     │
     │ POST pod_ip:4200/messages
     ▼
 link-channel server (PM2: zylos-link)
+    │
+    │ Returns 202 { request_id, status: "queued" } immediately
     │
     │ c4-receive.js --channel link-channel --endpoint <req_id>
     ▼
@@ -31,13 +33,12 @@ Claude processes message
     │
     │ c4-send.js "link-channel" "<req_id>" "response"
     ▼
-link-channel/scripts/send.js → writes response file
+link-channel/scripts/send.js
     │
+    │ Reads pending/<req_id>.json for agent_id + conversation_id
+    │ POST LINK_CALLBACK_URL (hxa-link /agent-callback)
     ▼
-link-channel server resolves HTTP response
-    │
-    ▼
-API Service ← { role: 'assistant', content: '...' }
+hxa-link receives response → broadcasts to frontend
 ```
 
 ## Service Management
@@ -48,12 +49,22 @@ pm2 logs zylos-link
 pm2 restart zylos-link
 ```
 
-## Response Files
+## Environment Variables
 
-- Pending requests: `~/zylos/link-channel/pending/<req_id>`
-- Responses: `~/zylos/link-channel/responses/<req_id>.json`
-- Files are cleaned up after each request completes
+| Var | Description |
+|-----|-------------|
+| `LINK_CHANNEL_PORT` | Server port (default: 4200) |
+| `LINK_CALLBACK_URL` | hxa-link callback endpoint (e.g. `https://jessie.coco.site/hxa-link-api/agent-callback`) |
+| `LINK_SERVICE_KEY` | Bearer token for callback auth |
+| `AGENT_ID` | Fallback agent ID |
 
-## Timeout
+## Pending Request Files
 
-Default request timeout: 30 seconds. Configurable via `LINK_CHANNEL_TIMEOUT_MS` env var.
+- Metadata: `~/zylos/link-channel/pending/<req_id>.json` — stores agent_id, conversation_id, content
+- Cleaned up by send.js after callback delivery
+
+## Key Difference from Sync Mode
+
+Previously, server.js waited for Claude's response via a file watcher (30s timeout).
+Now it returns immediately and send.js delivers the response asynchronously to hxa-link.
+This eliminates the timeout problem when Claude takes 1-3 minutes to process.
