@@ -100,6 +100,48 @@ if [ -n "${GH_TOKEN:-}" ]; then
   done
 fi
 
+# ── Generate component configs from env vars ──────────────────────────────────
+# Components need config.json to start. Generate minimal configs from env vars.
+# These configs are created only if they don't already exist (idempotent).
+COMP_DIR="${ZYLOS_DIR}/components"
+
+# hxa-connect config
+if [ -n "${HXA_CONNECT_ORG_ID:-}" ] && [ ! -f "${COMP_DIR}/hxa-connect/config.json" ]; then
+  mkdir -p "${COMP_DIR}/hxa-connect"
+  cat > "${COMP_DIR}/hxa-connect/config.json" <<HXAEOF
+{
+  "default_hub_url": "${HXA_CONNECT_URL:-https://connect.coco.xyz/hub}",
+  "orgs": {
+    "default": {
+      "enabled": true,
+      "org_id": "${HXA_CONNECT_ORG_ID}",
+      "agent_name": "${HXA_CONNECT_AGENT_NAME:-agent}",
+      "agent_token": "${HXA_CONNECT_ORG_TICKET:-}",
+      "hub_url": null,
+      "access": { "dmPolicy": "open", "groupPolicy": "open", "threads": {} }
+    }
+  }
+}
+HXAEOF
+  ok "Generated hxa-connect config"
+fi
+
+# lark config
+if [ -n "${LARK_APP_ID:-}" ] && [ ! -f "${COMP_DIR}/lark/config.json" ]; then
+  mkdir -p "${COMP_DIR}/lark"
+  cat > "${COMP_DIR}/lark/config.json" <<LARKEOF
+{
+  "enabled": false,
+  "webhook_port": 3457,
+  "bot": { "app_id": "${LARK_APP_ID}", "app_secret": "${LARK_APP_SECRET:-}" },
+  "dmPolicy": "owner",
+  "groupPolicy": "allowlist",
+  "groups": {}
+}
+LARKEOF
+  ok "Generated lark config (disabled — container agents use link-channel)"
+fi
+
 # ── Pass through channel env vars to .env ─────────────────────────────────────
 # zylos init doesn't write channel tokens — those come from component installs.
 # In Docker, we pass them via environment and append to .env here (upsert).
