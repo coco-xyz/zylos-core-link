@@ -87,6 +87,19 @@ fi
 
 ok "Workspace ready"
 
+# ── Install components (VM parity) ───────────────────────────────────────────
+# If GH_TOKEN is available, install components that match the VM's skill set.
+# Skipped if the skill directory already exists (idempotent).
+if [ -n "${GH_TOKEN:-}" ]; then
+  COMPONENTS_TO_INSTALL="lark hxa-connect"
+  for comp in ${COMPONENTS_TO_INSTALL}; do
+    if [ ! -d "${HOME}/.claude/skills/${comp}" ]; then
+      info "Installing component: ${comp}..."
+      GH_TOKEN="${GH_TOKEN}" zylos add "${comp}" --yes 2>/dev/null && ok "Component ${comp} installed" || warn "Failed to install ${comp} (non-fatal)"
+    fi
+  done
+fi
+
 # ── Pass through channel env vars to .env ─────────────────────────────────────
 # zylos init doesn't write channel tokens — those come from component installs.
 # In Docker, we pass them via environment and append to .env here (upsert).
@@ -114,6 +127,18 @@ upsert_env "OPENAI_API_KEY" "${OPENAI_API_KEY:-}"
 upsert_env "CODEX_API_KEY" "${CODEX_API_KEY:-}"
 # Link channel — in-container HTTP bridge for agent API service (port 4200)
 upsert_env "LINK_CHANNEL_ENABLED" "${LINK_CHANNEL_ENABLED:-}"
+
+# ── External service credentials (VM parity) ─────────────────────────────────
+# These env vars are injected via K8s agent-env secret or docker-compose env
+# to give container agents the same capabilities as the VM.
+upsert_env "GH_TOKEN" "${GH_TOKEN:-}"
+upsert_env "GIT_COCO_XYZ_TOKEN" "${GIT_COCO_XYZ_TOKEN:-}"
+upsert_env "HXA_CONNECT_AGENT_NAME" "${HXA_CONNECT_AGENT_NAME:-}"
+upsert_env "HXA_CONNECT_ORG_ID" "${HXA_CONNECT_ORG_ID:-}"
+upsert_env "HXA_CONNECT_ORG_TICKET" "${HXA_CONNECT_ORG_TICKET:-}"
+upsert_env "HXA_CONNECT_URL" "${HXA_CONNECT_URL:-}"
+upsert_env "DISABLE_TELEMETRY" "${DISABLE_TELEMETRY:-1}"
+upsert_env "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY" "${CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY:-1}"
 
 # Save current PATH so PM2 services can find claude and node
 upsert_env "SYSTEM_PATH" "${PATH}"
