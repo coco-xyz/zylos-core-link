@@ -236,6 +236,17 @@ describe('checkDuplicate', () => {
     assert.ok(store.size < 101, `store should have been cleaned, size: ${store.size}`);
     assert.ok(store.has('new-key'));
   });
+
+  it('treats expired entry as new message', () => {
+    const store = new Map();
+    // Insert an entry that is already expired
+    store.set('key1', { reqId: 'old-req', ts: Date.now() - 400_000 });
+    // Same key but TTL is 300s — old entry should be expired
+    const result = checkDuplicate(store, 'key1', 'new-req', 300_000);
+    assert.equal(result, null, 'expired entry should not count as duplicate');
+    // Store should have the new entry
+    assert.equal(store.get('key1').reqId, 'new-req');
+  });
 });
 
 // ─── extractMultimodalContent ───────────────────────────────────────────────
