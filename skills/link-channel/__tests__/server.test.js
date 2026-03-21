@@ -192,11 +192,17 @@ describe('link-channel server', () => {
       });
       assert.equal(json.status, 'queued');
 
-      // Verify pending file was written
+      // Verify pending file was written (poll with timeout to avoid flakiness)
       const pendingPath = path.join(tmpDir, 'link-channel', 'pending', `${json.request_id}.json`);
-      // Give a moment for the async file write
-      await new Promise(r => setTimeout(r, 100));
-      const meta = JSON.parse(fs.readFileSync(pendingPath, 'utf8'));
+      let meta;
+      for (let i = 0; i < 20; i++) {
+        if (fs.existsSync(pendingPath)) {
+          meta = JSON.parse(fs.readFileSync(pendingPath, 'utf8'));
+          break;
+        }
+        await new Promise(r => setTimeout(r, 50));
+      }
+      assert.ok(meta, 'pending metadata file should exist');
       assert.equal(meta.conversationId, 'conv-abc-123');
     });
 

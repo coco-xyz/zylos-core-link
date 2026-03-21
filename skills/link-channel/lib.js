@@ -142,9 +142,17 @@ export function stageFile(filePath, allowedDirs, filesDir) {
 export function checkDuplicate(store, key, reqId, ttl) {
   const now = Date.now();
   const existing = store.get(key);
-  if (existing) return existing.reqId;
+  if (existing) {
+    // Check if the entry has expired
+    if (now - existing.ts > ttl) {
+      store.delete(key);
+      // Fall through to treat as new message
+    } else {
+      return existing.reqId;
+    }
+  }
   store.set(key, { reqId, ts: now });
-  // Periodic cleanup
+  // Periodic cleanup when store gets large
   if (store.size > 100) {
     for (const [k, entry] of store) {
       if (now - entry.ts > ttl) store.delete(k);
