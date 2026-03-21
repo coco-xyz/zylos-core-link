@@ -28,12 +28,40 @@ const PENDING_DIR = path.join(DATA_DIR, 'pending');
 const C4_RECEIVE = path.join(SKILLS_DIR, 'comm-bridge', 'scripts', 'c4-receive.js');
 
 const PORT = parseInt(process.env.LINK_CHANNEL_PORT || '4200', 10);
+const IMAGES_DIR = path.join(DATA_DIR, 'images');
 
 // Ensure data directories exist
 fs.mkdirSync(PENDING_DIR, { recursive: true });
+fs.mkdirSync(IMAGES_DIR, { recursive: true });
 
 // Track in-flight requests for health reporting
 let inflight = 0;
+
+/**
+ * Download an image from a URL to a local file.
+ * Returns the local file path on success, null on failure.
+ */
+async function downloadImage(imageUrl, reqId) {
+  try {
+    const ext = path.extname(new URL(imageUrl).pathname) || '.png';
+    const filename = `${reqId}${ext}`;
+    const localPath = path.join(IMAGES_DIR, filename);
+
+    const res = await fetch(imageUrl, { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) {
+      console.error(`[link-channel] Image download failed: ${res.status} ${imageUrl}`);
+      return null;
+    }
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+    fs.writeFileSync(localPath, buffer);
+    console.log(`[link-channel] Image downloaded: ${localPath} (${buffer.length} bytes)`);
+    return localPath;
+  } catch (err) {
+    console.error(`[link-channel] Image download error: ${err.message}`);
+    return null;
+  }
+}
 
 function queueMessage(reqId, agentId, conversationId, content) {
   // Store metadata for send.js to read when delivering response
@@ -132,6 +160,19 @@ const server = http.createServer(async (req, res) => {
   const agentId = req.headers['x-agent-id'] || process.env.AGENT_ID || null;
   const conversationId = body.conversation_id || null;
   const reqId = crypto.randomUUID().replace(/-/g, '');
+  const imageUrl = typeof body.image_url === 'string' ? body.image_url : null;
+
+  // If image_url is present, download it before queueing
+  if (imageUrl) {
+    const localPath = await downloadImage(imageUrl, reqId);
+    if (localPath) {
+      // Prepend image path so Claude reads the image via its Read tool
+      content = `[Attached image: ${localPath}]\n${content}`;
+    } else {
+      // Image download failed — still deliver the text with a note
+      content = `[Image failed to download: ${imageUrl}]\n${content}`;
+    }
+  }
 
   // Queue to C4 and return immediately
   queueMessage(reqId, agentId, conversationId, content);
