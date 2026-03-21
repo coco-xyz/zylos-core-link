@@ -24,6 +24,11 @@ import path from 'path';
 import os from 'os';
 import { spawn } from 'child_process';
 import crypto from 'crypto';
+import {
+  checkDuplicate as checkDup,
+  extractMultimodalContent as extractContent,
+  MIME_TYPES,
+} from './lib.js';
 
 const ZYLOS_DIR = process.env.ZYLOS_DIR || path.join(os.homedir(), 'zylos');
 const SKILLS_DIR = path.join(ZYLOS_DIR, '.claude', 'skills');
@@ -68,38 +73,9 @@ setInterval(cleanStaledFiles, 30 * 60 * 1000); // every 30 minutes
 const processedMessages = new Map();
 const DEDUP_TTL = 5 * 60 * 1000;
 
-/**
- * Check if a message is a duplicate. Returns the original reqId if duplicate, null otherwise.
- */
 function checkDuplicate(key, reqId) {
-  const now = Date.now();
-  const existing = processedMessages.get(key);
-  if (existing) return existing.reqId;
-  processedMessages.set(key, { reqId, ts: now });
-  // Periodic cleanup
-  if (processedMessages.size > 100) {
-    for (const [k, entry] of processedMessages) {
-      if (now - entry.ts > DEDUP_TTL) processedMessages.delete(k);
-    }
-  }
-  return null;
+  return checkDup(processedMessages, key, reqId, DEDUP_TTL);
 }
-
-// MIME type map for file serving
-const MIME_TYPES = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.pdf': 'application/pdf',
-  '.json': 'application/json',
-  '.txt': 'text/plain',
-  '.md': 'text/markdown',
-  '.csv': 'text/csv',
-  '.zip': 'application/zip',
-};
 
 const MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024; // 50MB
 
@@ -144,57 +120,8 @@ async function downloadFile(fileUrl, reqId, prefix) {
   }
 }
 
-/**
- * Extract content from multimodal message blocks.
- * Supports:
- *   - { type: "text", text: "..." }
- *   - { type: "image_url", image_url: { url: "..." } }
- *   - { type: "image", url: "...", text: "..." }
- *   - plain string content
- */
 async function extractMultimodalContent(msg, reqId) {
-  if (typeof msg.content === 'string') return msg.content;
-  if (!Array.isArray(msg.content)) return JSON.stringify(msg.content);
-
-  const parts = [];
-  let imgIdx = 0;
-  let fileIdx = 0;
-
-  for (const block of msg.content) {
-    if (typeof block === 'string') {
-      parts.push(block);
-      continue;
-    }
-
-    if (block.type === 'text' && block.text) {
-      parts.push(block.text);
-    } else if (block.type === 'image_url' && block.image_url?.url) {
-      const result = await downloadFile(block.image_url.url, reqId, `img${imgIdx++}`);
-      if (result) {
-        parts.push(`[Attached image: ${result.localPath}]`);
-      } else {
-        parts.push(`[Image failed to download: ${block.image_url.url}]`);
-      }
-    } else if (block.type === 'image' && block.url) {
-      const result = await downloadFile(block.url, reqId, `img${imgIdx++}`);
-      if (result) {
-        parts.push(`[Attached image: ${result.localPath}]`);
-      } else {
-        parts.push(`[Image failed to download: ${block.url}]`);
-      }
-      if (block.text) parts.push(block.text);
-    } else if (block.type === 'file' && block.url) {
-      const result = await downloadFile(block.url, reqId, `file${fileIdx++}`);
-      if (result) {
-        parts.push(`[Attached file: ${result.localPath}]`);
-      } else {
-        parts.push(`[File failed to download: ${block.url}]`);
-      }
-      if (block.text) parts.push(block.text);
-    }
-  }
-
-  return parts.join('\n');
+  return extractContent(msg, reqId, downloadFile);
 }
 
 function queueMessage(reqId, agentId, conversationId, content) {

@@ -24,6 +24,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { splitMessage, stageFile as stageFileLib, parseMediaPrefix } from '../lib.js';
 
 const ZYLOS_DIR = process.env.ZYLOS_DIR || path.join(os.homedir(), 'zylos');
 const PENDING_DIR = path.join(ZYLOS_DIR, 'link-channel', 'pending');
@@ -56,71 +57,7 @@ const agentId = meta.agentId || process.env.AGENT_ID || null;
 const conversationId = meta.conversationId || null;
 
 // Parse [MEDIA:type] prefix
-const mediaMatch = content.match(/^\[MEDIA:(\w+)\](.+)$/);
-
-/**
- * Split long text into chunks (markdown-aware).
- * Keeps code blocks intact where possible.
- */
-function splitMessage(text, maxLength) {
-  if (text.length <= maxLength) return [text];
-
-  const chunks = [];
-  let remaining = text;
-
-  while (remaining.length > 0) {
-    if (remaining.length <= maxLength) {
-      const finalChunk = remaining.trim();
-      if (finalChunk.length > 0) chunks.push(finalChunk);
-      break;
-    }
-
-    let breakAt = maxLength;
-    const segment = remaining.substring(0, breakAt);
-    const fenceMatches = segment.match(/```/g);
-    const insideCodeBlock = fenceMatches && fenceMatches.length % 2 !== 0;
-
-    if (insideCodeBlock) {
-      // Try to break before the code block
-      const lastFenceStart = segment.lastIndexOf('```');
-      const lineBeforeFence = remaining.lastIndexOf('\n', lastFenceStart - 1);
-      if (lineBeforeFence > maxLength * 0.2) {
-        breakAt = lineBeforeFence;
-      } else {
-        // Include the entire code block
-        const fenceEnd = remaining.indexOf('```', lastFenceStart + 3);
-        if (fenceEnd !== -1) {
-          const blockEnd = remaining.indexOf('\n', fenceEnd + 3);
-          breakAt = blockEnd !== -1 ? blockEnd + 1 : fenceEnd + 3;
-        }
-        if (breakAt > maxLength * 1.5) breakAt = maxLength;
-      }
-    } else {
-      // Prefer breaking at paragraph, then line, then word boundaries
-      const chunk = remaining.substring(0, breakAt);
-      const lastParaBreak = chunk.lastIndexOf('\n\n');
-      if (lastParaBreak > maxLength * 0.3) {
-        breakAt = lastParaBreak + 1;
-      } else {
-        const lastNewline = chunk.lastIndexOf('\n');
-        if (lastNewline > maxLength * 0.3) {
-          breakAt = lastNewline;
-        } else {
-          const lastSpace = chunk.lastIndexOf(' ');
-          if (lastSpace > maxLength * 0.3) {
-            breakAt = lastSpace;
-          }
-        }
-      }
-    }
-
-    const nextChunk = remaining.substring(0, breakAt).trim();
-    if (nextChunk.length > 0) chunks.push(nextChunk);
-    remaining = remaining.substring(breakAt).trim();
-  }
-
-  return chunks;
-}
+const mediaMatch = parseMediaPrefix(content);
 
 // Allowed source directories for media staging (prevent credential leaks)
 const ALLOWED_MEDIA_DIRS = [
@@ -129,31 +66,8 @@ const ALLOWED_MEDIA_DIRS = [
   '/tmp',
 ];
 
-/**
- * Copy a file to the shared files directory and return its serve path.
- * Only files from allowed directories can be staged (security: prevents
- * Claude from exposing .env or other sensitive files via /files/).
- */
 function stageFile(filePath) {
-  const trimmed = filePath.trim();
-  const resolved = path.resolve(trimmed);
-
-  // Security: reject files outside allowed directories
-  const allowed = ALLOWED_MEDIA_DIRS.some(dir => resolved.startsWith(dir + path.sep));
-  if (!allowed) {
-    throw new Error(`Path not allowed for media staging: ${trimmed}`);
-  }
-
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`File not found: ${resolved}`);
-  }
-  fs.mkdirSync(FILES_DIR, { recursive: true });
-  const basename = path.basename(resolved);
-  const ts = Date.now();
-  const destName = `${ts}-${basename}`;
-  const destPath = path.join(FILES_DIR, destName);
-  fs.copyFileSync(resolved, destPath);
-  return destName;
+  return stageFileLib(filePath, ALLOWED_MEDIA_DIRS, FILES_DIR);
 }
 
 /**
@@ -200,7 +114,7 @@ async function send() {
   try {
     if (mediaMatch) {
       // Media message: [MEDIA:image]/path or [MEDIA:file]/path
-      const [, mediaType, mediaPath] = mediaMatch;
+      const { mediaType, mediaPath } = mediaMatch;
       let payload;
 
       try {
