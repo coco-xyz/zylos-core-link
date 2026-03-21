@@ -122,21 +122,37 @@ function splitMessage(text, maxLength) {
   return chunks;
 }
 
+// Allowed source directories for media staging (prevent credential leaks)
+const ALLOWED_MEDIA_DIRS = [
+  path.join(ZYLOS_DIR, 'workspace'),
+  path.join(ZYLOS_DIR, 'link-channel'),
+  '/tmp',
+];
+
 /**
  * Copy a file to the shared files directory and return its serve path.
- * The file will be accessible via GET /files/<filename> on the local server.
+ * Only files from allowed directories can be staged (security: prevents
+ * Claude from exposing .env or other sensitive files via /files/).
  */
 function stageFile(filePath) {
   const trimmed = filePath.trim();
-  if (!fs.existsSync(trimmed)) {
-    throw new Error(`File not found: ${trimmed}`);
+  const resolved = path.resolve(trimmed);
+
+  // Security: reject files outside allowed directories
+  const allowed = ALLOWED_MEDIA_DIRS.some(dir => resolved.startsWith(dir + path.sep));
+  if (!allowed) {
+    throw new Error(`Path not allowed for media staging: ${trimmed}`);
+  }
+
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`File not found: ${resolved}`);
   }
   fs.mkdirSync(FILES_DIR, { recursive: true });
-  const basename = path.basename(trimmed);
+  const basename = path.basename(resolved);
   const ts = Date.now();
   const destName = `${ts}-${basename}`;
   const destPath = path.join(FILES_DIR, destName);
-  fs.copyFileSync(trimmed, destPath);
+  fs.copyFileSync(resolved, destPath);
   return destName;
 }
 
@@ -234,7 +250,16 @@ async function send() {
           console.log(`[link-channel] Callback delivered for ${reqId} (chunk ${i + 1}/${chunks.length}): ${JSON.stringify(result)}`);
         } catch (err) {
           console.error(`[link-channel] Callback failed for chunk ${i + 1}/${chunks.length}: ${err.message}`);
-          // On failure, don't send remaining chunks
+          // Notify frontend that message was truncated
+          try {
+            await postCallback({
+              agent_id: agentId,
+              conversation_id: conversationId,
+              content: `[Message truncated: delivery failed at chunk ${i + 1}/${chunks.length}]`,
+              content_type: 'error',
+              request_id: reqId,
+            });
+          } catch { /* best-effort */ }
           process.exit(1);
         }
 

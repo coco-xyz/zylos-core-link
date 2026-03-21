@@ -43,21 +43,46 @@ for (const dir of [PENDING_DIR, IMAGES_DIR, FILES_DIR]) {
 // Track in-flight requests
 let inflight = 0;
 
+// Cleanup stale files on startup and periodically (1 hour max age)
+const FILE_MAX_AGE = 60 * 60 * 1000;
+function cleanStaledFiles() {
+  const now = Date.now();
+  for (const dir of [FILES_DIR, IMAGES_DIR]) {
+    try {
+      for (const file of fs.readdirSync(dir)) {
+        const filePath = path.join(dir, file);
+        try {
+          const stat = fs.statSync(filePath);
+          if (now - stat.mtimeMs > FILE_MAX_AGE) {
+            fs.unlinkSync(filePath);
+          }
+        } catch { /* skip individual file errors */ }
+      }
+    } catch { /* dir may not exist yet */ }
+  }
+}
+cleanStaledFiles();
+setInterval(cleanStaledFiles, 30 * 60 * 1000); // every 30 minutes
+
 // Message deduplication (5-minute window)
 const processedMessages = new Map();
 const DEDUP_TTL = 5 * 60 * 1000;
 
-function isDuplicate(key) {
+/**
+ * Check if a message is a duplicate. Returns the original reqId if duplicate, null otherwise.
+ */
+function checkDuplicate(key, reqId) {
   const now = Date.now();
-  if (processedMessages.has(key)) return true;
-  processedMessages.set(key, now);
+  const existing = processedMessages.get(key);
+  if (existing) return existing.reqId;
+  processedMessages.set(key, { reqId, ts: now });
   // Periodic cleanup
   if (processedMessages.size > 100) {
-    for (const [k, ts] of processedMessages) {
-      if (now - ts > DEDUP_TTL) processedMessages.delete(k);
+    for (const [k, entry] of processedMessages) {
+      if (now - entry.ts > DEDUP_TTL) processedMessages.delete(k);
     }
   }
-  return false;
+  return null;
 }
 
 // MIME type map for file serving
@@ -76,9 +101,12 @@ const MIME_TYPES = {
   '.zip': 'application/zip',
 };
 
+const MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024; // 50MB
+
 /**
  * Download a file from a URL to a local path.
  * Returns { localPath, mimeType } on success, null on failure.
+ * Rejects files larger than MAX_DOWNLOAD_SIZE.
  */
 async function downloadFile(fileUrl, reqId, prefix) {
   try {
@@ -93,7 +121,19 @@ async function downloadFile(fileUrl, reqId, prefix) {
       return null;
     }
 
+    // Check content-length before downloading
+    const contentLength = parseInt(res.headers.get('content-length') || '0', 10);
+    if (contentLength > MAX_DOWNLOAD_SIZE) {
+      console.error(`[link-channel] Download too large: ${contentLength} bytes (max ${MAX_DOWNLOAD_SIZE})`);
+      return null;
+    }
+
     const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length > MAX_DOWNLOAD_SIZE) {
+      console.error(`[link-channel] Downloaded file too large: ${buffer.length} bytes`);
+      return null;
+    }
+
     fs.writeFileSync(localPath, buffer);
     const mimeType = res.headers.get('content-type') || MIME_TYPES[ext] || 'application/octet-stream';
     console.log(`[link-channel] Downloaded: ${localPath} (${buffer.length} bytes, ${mimeType})`);
@@ -117,7 +157,8 @@ async function extractMultimodalContent(msg, reqId) {
   if (!Array.isArray(msg.content)) return JSON.stringify(msg.content);
 
   const parts = [];
-  let imageIndex = 0;
+  let imgIdx = 0;
+  let fileIdx = 0;
 
   for (const block of msg.content) {
     if (typeof block === 'string') {
@@ -128,14 +169,14 @@ async function extractMultimodalContent(msg, reqId) {
     if (block.type === 'text' && block.text) {
       parts.push(block.text);
     } else if (block.type === 'image_url' && block.image_url?.url) {
-      const result = await downloadFile(block.image_url.url, reqId, `img${imageIndex++}`);
+      const result = await downloadFile(block.image_url.url, reqId, `img${imgIdx++}`);
       if (result) {
         parts.push(`[Attached image: ${result.localPath}]`);
       } else {
         parts.push(`[Image failed to download: ${block.image_url.url}]`);
       }
     } else if (block.type === 'image' && block.url) {
-      const result = await downloadFile(block.url, reqId, `img${imageIndex++}`);
+      const result = await downloadFile(block.url, reqId, `img${imgIdx++}`);
       if (result) {
         parts.push(`[Attached image: ${result.localPath}]`);
       } else {
@@ -143,7 +184,7 @@ async function extractMultimodalContent(msg, reqId) {
       }
       if (block.text) parts.push(block.text);
     } else if (block.type === 'file' && block.url) {
-      const result = await downloadFile(block.url, reqId, `file${imageIndex++}`);
+      const result = await downloadFile(block.url, reqId, `file${fileIdx++}`);
       if (result) {
         parts.push(`[Attached file: ${result.localPath}]`);
       } else {
@@ -177,10 +218,10 @@ function queueMessage(reqId, agentId, conversationId, content) {
   });
 
   child.on('close', (code) => {
+    inflight--;
     if (code !== 0) {
       console.error(`[link-channel] c4-receive exited with code ${code} for ${reqId}`);
       fs.unlink(path.join(PENDING_DIR, `${reqId}.json`), () => {});
-      inflight--;
     }
   });
 
@@ -257,7 +298,12 @@ const server = http.createServer(async (req, res) => {
 
   // Static file serving for outbound media
   if (req.method === 'GET' && req.url.startsWith('/files/')) {
-    const filename = decodeURIComponent(req.url.substring(7).split('?')[0]);
+    let filename;
+    try {
+      filename = decodeURIComponent(req.url.substring(7).split('?')[0]);
+    } catch {
+      return sendJson(res, 400, { error: 'invalid_url_encoding' });
+    }
     return serveFile(req, res, filename);
   }
 
@@ -277,11 +323,14 @@ const server = http.createServer(async (req, res) => {
   const conversationId = body.conversation_id || null;
   const reqId = crypto.randomUUID().replace(/-/g, '');
 
-  // Deduplication: use message content hash as key
+  // Deduplication: use caller-provided key
   const dedupKey = body.dedup_key || null;
-  if (dedupKey && isDuplicate(dedupKey)) {
-    console.log(`[link-channel] Duplicate message filtered: ${dedupKey}`);
-    return sendJson(res, 200, { request_id: reqId, status: 'duplicate' });
+  if (dedupKey) {
+    const originalReqId = checkDuplicate(dedupKey, reqId);
+    if (originalReqId) {
+      console.log(`[link-channel] Duplicate message filtered: ${dedupKey}`);
+      return sendJson(res, 200, { request_id: originalReqId, status: 'duplicate' });
+    }
   }
 
   // Extract content from various message formats
