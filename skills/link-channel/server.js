@@ -91,7 +91,13 @@ async function downloadFile(fileUrl, reqId, prefix) {
     const filename = `${prefix}-${reqId}${ext}`;
     const localPath = path.join(IMAGES_DIR, filename);
 
-    const res = await fetch(fileUrl, { signal: AbortSignal.timeout(30_000) });
+    const fetchOpts = { signal: AbortSignal.timeout(30_000), headers: {} };
+    // Add service key auth for API file downloads (pod doesn't have user JWT)
+    const serviceKey = process.env.LINK_SERVICE_KEY;
+    if (serviceKey) {
+      fetchOpts.headers['Authorization'] = `Bearer ${serviceKey}`;
+    }
+    const res = await fetch(fileUrl, fetchOpts);
     if (!res.ok) {
       console.error(`[link-channel] Download failed: ${res.status} ${fileUrl}`);
       return null;
