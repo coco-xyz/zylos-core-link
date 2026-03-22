@@ -87,60 +87,10 @@ fi
 
 ok "Workspace ready"
 
-# ── Install components (VM parity) ───────────────────────────────────────────
-# If GH_TOKEN is available, install components that match the VM's skill set.
-# Skipped if the skill directory already exists (idempotent).
-if [ -n "${GH_TOKEN:-}" ]; then
-  COMPONENTS_TO_INSTALL="lark hxa-connect"
-  for comp in ${COMPONENTS_TO_INSTALL}; do
-    if [ ! -d "${HOME}/.claude/skills/${comp}" ]; then
-      info "Installing component: ${comp}..."
-      GH_TOKEN="${GH_TOKEN}" zylos add "${comp}" --yes 2>/dev/null && ok "Component ${comp} installed" || warn "Failed to install ${comp} (non-fatal)"
-    fi
-  done
-fi
-
-# ── Generate component configs from env vars ──────────────────────────────────
-# Components need config.json to start. Generate minimal configs from env vars.
-# These configs are created only if they don't already exist (idempotent).
-COMP_DIR="${ZYLOS_DIR}/components"
-
-# hxa-connect config
-if [ -n "${HXA_CONNECT_ORG_ID:-}" ] && [ ! -f "${COMP_DIR}/hxa-connect/config.json" ]; then
-  mkdir -p "${COMP_DIR}/hxa-connect"
-  cat > "${COMP_DIR}/hxa-connect/config.json" <<HXAEOF
-{
-  "default_hub_url": "${HXA_CONNECT_URL:-https://connect.coco.xyz/hub}",
-  "orgs": {
-    "default": {
-      "enabled": true,
-      "org_id": "${HXA_CONNECT_ORG_ID}",
-      "agent_name": "${HXA_CONNECT_AGENT_NAME:-agent}",
-      "agent_token": "${HXA_CONNECT_ORG_TICKET:-}",
-      "hub_url": null,
-      "access": { "dmPolicy": "open", "groupPolicy": "open", "threads": {} }
-    }
-  }
-}
-HXAEOF
-  ok "Generated hxa-connect config"
-fi
-
-# lark config
-if [ -n "${LARK_APP_ID:-}" ] && [ ! -f "${COMP_DIR}/lark/config.json" ]; then
-  mkdir -p "${COMP_DIR}/lark"
-  cat > "${COMP_DIR}/lark/config.json" <<LARKEOF
-{
-  "enabled": false,
-  "webhook_port": 3457,
-  "bot": { "app_id": "${LARK_APP_ID}", "app_secret": "${LARK_APP_SECRET:-}" },
-  "dmPolicy": "owner",
-  "groupPolicy": "allowlist",
-  "groups": {}
-}
-LARKEOF
-  ok "Generated lark config (disabled — container agents use link-channel)"
-fi
+# ── Component channels removed ────────────────────────────────────────────────
+# hxa-connect and lark are NOT installed in container images.
+# Container agents communicate exclusively via link-channel (zylos-link).
+# These channels are only used on the VM where proper credentials are available.
 
 # ── Pass through channel env vars to .env ─────────────────────────────────────
 # zylos init doesn't write channel tokens — those come from component installs.
@@ -157,8 +107,6 @@ upsert_env() {
 }
 
 upsert_env "TELEGRAM_BOT_TOKEN" "${TELEGRAM_BOT_TOKEN:-}"
-upsert_env "LARK_APP_ID" "${LARK_APP_ID:-}"
-upsert_env "LARK_APP_SECRET" "${LARK_APP_SECRET:-}"
 upsert_env "WEB_CONSOLE_BIND" "${WEB_CONSOLE_BIND:-0.0.0.0}"
 upsert_env "CLAUDE_BYPASS_PERMISSIONS" "${CLAUDE_BYPASS_PERMISSIONS:-true}"
 upsert_env "CODEX_BYPASS_PERMISSIONS" "${CODEX_BYPASS_PERMISSIONS:-true}"
@@ -175,10 +123,6 @@ upsert_env "LINK_CHANNEL_ENABLED" "${LINK_CHANNEL_ENABLED:-}"
 # to give container agents the same capabilities as the VM.
 upsert_env "GH_TOKEN" "${GH_TOKEN:-}"
 upsert_env "GIT_COCO_XYZ_TOKEN" "${GIT_COCO_XYZ_TOKEN:-}"
-upsert_env "HXA_CONNECT_AGENT_NAME" "${HXA_CONNECT_AGENT_NAME:-}"
-upsert_env "HXA_CONNECT_ORG_ID" "${HXA_CONNECT_ORG_ID:-}"
-upsert_env "HXA_CONNECT_ORG_TICKET" "${HXA_CONNECT_ORG_TICKET:-}"
-upsert_env "HXA_CONNECT_URL" "${HXA_CONNECT_URL:-}"
 upsert_env "DISABLE_TELEMETRY" "${DISABLE_TELEMETRY:-1}"
 upsert_env "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY" "${CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY:-1}"
 
