@@ -130,6 +130,42 @@ async function extractMultimodalContent(msg, reqId) {
   return extractContent(msg, reqId, downloadFile);
 }
 
+/**
+ * Send an error callback to hxa-link so the user sees the error message.
+ * Best-effort — failures are logged but not retried.
+ */
+async function sendErrorCallback(reqId, agentId, conversationId, errorMessage) {
+  const callbackUrl = process.env.LINK_CALLBACK_URL;
+  if (!callbackUrl) return;
+
+  const serviceKey = process.env.LINK_SERVICE_KEY;
+  try {
+    const res = await fetch(callbackUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(serviceKey ? { Authorization: `Bearer ${serviceKey}` } : {}),
+      },
+      body: JSON.stringify({
+        agent_id: agentId,
+        conversation_id: conversationId,
+        content: errorMessage,
+        content_type: 'error',
+        request_id: reqId,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.ok) {
+      console.log(`[link-channel] Error callback sent for ${reqId}`);
+    } else {
+      const body = await res.text().catch(() => '');
+      console.error(`[link-channel] Error callback failed ${res.status} for ${reqId}: ${body}`);
+    }
+  } catch (err) {
+    console.error(`[link-channel] Error callback error for ${reqId}: ${err.message}`);
+  }
+}
+
 function queueMessage(reqId, agentId, conversationId, content) {
   const meta = { agentId, conversationId, content, ts: Date.now() };
   fs.writeFileSync(path.join(PENDING_DIR, `${reqId}.json`), JSON.stringify(meta));
@@ -146,20 +182,28 @@ function queueMessage(reqId, agentId, conversationId, content) {
     '--content', messageContent,
   ]);
 
+  let stderrBuf = '';
   child.stderr.on('data', (d) => {
-    console.error('[link-channel] c4-receive stderr:', d.toString().trim());
+    const text = d.toString().trim();
+    stderrBuf += text + '\n';
+    console.error('[link-channel] c4-receive stderr:', text);
   });
 
   child.on('close', (code) => {
     inflight--;
     if (code !== 0) {
       console.error(`[link-channel] c4-receive exited with code ${code} for ${reqId}`);
+      // Extract user-facing error message from stderr and send callback
+      const errMatch = stderrBuf.match(/Error:\s*(.+)/);
+      const userMessage = errMatch ? errMatch[1].trim() : 'Something went wrong. Please try again later.';
+      sendErrorCallback(reqId, agentId, conversationId, userMessage);
       fs.unlink(path.join(PENDING_DIR, `${reqId}.json`), () => {});
     }
   });
 
   child.on('error', (err) => {
     console.error(`[link-channel] c4-receive error for ${reqId}:`, err.message);
+    sendErrorCallback(reqId, agentId, conversationId, 'Something went wrong. Please try again later.');
     fs.unlink(path.join(PENDING_DIR, `${reqId}.json`), () => {});
     inflight--;
   });
