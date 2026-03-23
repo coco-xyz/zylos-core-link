@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       procps \
       # For `zylos doctor` network checks
       dnsutils \
-      # For claude-token-refresh.sh JSON parsing
+      # For JSON parsing in scripts
       jq \
     && rm -rf /var/lib/apt/lists/*
 
@@ -67,10 +67,6 @@ COPY --chown=zylos:zylos templates/pm2/ecosystem.config.cjs /home/zylos/zylos/pm
 # ── Copy entrypoint ───────────────────────────────────────────────────────────
 COPY --chown=zylos:zylos docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-
-# ── Copy token refresh service (from COCO golden-image) ──────────────────────
-COPY --chown=zylos:zylos docker/claude-token-refresh.sh /opt/zylos/claude-token-refresh.sh
-RUN chmod +x /opt/zylos/claude-token-refresh.sh
 
 # ── Ports ─────────────────────────────────────────────────────────────────────
 # Web console (web-console service, default 3456)
