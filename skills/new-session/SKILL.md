@@ -1,21 +1,22 @@
 ---
 name: new-session
-description: Start a new session by clearing context via /clear. Faster than restart — no process kill/restart cycle. Use when context is high or when a fresh session is needed without restarting Claude Code.
+description: Start a new session when context is high. Both Claude and Codex use /clear. Use when context is high or when a fresh session is needed.
 ---
 
 # New Session Skill
 
-Start a fresh Claude Code session using /clear instead of /exit + restart. The process stays alive — only the conversation context resets. This is faster than restart-claude because it skips the process kill/restart/PM2 detection cycle.
+Start a fresh session with graceful handoff.
+Claude and Codex both use `/clear` (process stays alive, only context resets).
 
 ## When to Use
 
-- Context usage exceeds 70% (triggered automatically by context-monitor.js)
+- Context usage exceeds the runtime threshold (triggered automatically by context monitoring)
 - User explicitly asks for a new session or context reset
 - When you need a clean context but don't need to reload settings/hooks (use restart-claude for that)
 
 ## Pre-Clear Checklist
 
-Before sending `/clear`, complete these steps **in order**:
+Before sending the session switch command, complete these steps **in order**:
 
 ### 1. Inventory running background tasks
 
@@ -48,7 +49,7 @@ Determine who to notify:
 
 The goal is twofold: (a) the user knows what's happening, and (b) the handoff summary appears in C4 conversation history, so the new session can seamlessly continue the work.
 
-### 5. Enqueue /clear
+### 5. Enqueue Session Switch Command
 
 ```bash
 node ~/zylos/.claude/skills/comm-bridge/scripts/c4-control.js enqueue --content "/clear" --priority 1 --require-idle
@@ -56,8 +57,10 @@ node ~/zylos/.claude/skills/comm-bridge/scripts/c4-control.js enqueue --content 
 
 ## How It Works
 
-1. **Enqueue /clear**: Puts `/clear` into the control queue (priority=1, require_idle)
-2. **Deliver when idle**: Dispatcher delivers `/clear` to Claude when idle
-3. **Session resets**: Claude Code clears conversation context, session-start hooks fire
+1. **Enqueue switch command**: Puts `/clear` into the control queue
+2. **Deliver when idle**: Dispatcher delivers the command when idle
+3. **Session switches**:
+   - Claude: clears conversation context, session-start hooks fire
+   - Codex: clears conversation context and continues in the same runtime process
 4. **Background tasks survive**: Any running subagents continue as independent processes
 5. **New session**: The new session picks up handoff context (including background task IDs) from C4 conversation history via session-start hooks, and can use `TaskOutput` to receive results from still-running tasks
