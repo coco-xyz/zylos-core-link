@@ -13,6 +13,24 @@ import { execSync, execFileSync, spawnSync } from 'node:child_process';
 import { ZYLOS_DIR } from './config.js';
 import { commandExists } from './shell-utils.js';
 
+function upsertEnvValue(content, key, value, comment = null) {
+  const line = `${key}=${value}`;
+  if (content.match(new RegExp(`^\\s*${key}\\s*=.*$`, 'm'))) {
+    return content.replace(new RegExp(`^\\s*${key}\\s*=.*$`, 'm'), line);
+  }
+  const prefix = comment ? `\n\n# ${comment}\n` : '\n';
+  return content.trimEnd() + `${prefix}${line}\n`;
+}
+
+export function isValidBaseUrl(value) {
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && !!url.host;
+  } catch {
+    return false;
+  }
+}
+
 // ── Install ────────────────────────────────────────────────────────────────
 
 /**
@@ -177,11 +195,7 @@ export function saveApiKeyToEnv(apiKey) {
   try {
     let content = '';
     try { content = fs.readFileSync(envPath, 'utf8'); } catch {}
-    if (content.match(/^\s*ANTHROPIC_API_KEY\s*=.*$/m)) {
-      content = content.replace(/^\s*ANTHROPIC_API_KEY\s*=.*$/m, `ANTHROPIC_API_KEY=${apiKey}`);
-    } else {
-      content = content.trimEnd() + `\n\n# Anthropic API key (set by zylos init)\nANTHROPIC_API_KEY=${apiKey}\n`;
-    }
+    content = upsertEnvValue(content, 'ANTHROPIC_API_KEY', apiKey, 'Anthropic API key (set by zylos init)');
     fs.writeFileSync(envPath, content);
   } catch {}
 }
@@ -221,15 +235,51 @@ export function saveSetupTokenToEnv(token) {
   try {
     let content = '';
     try { content = fs.readFileSync(envPath, 'utf8'); } catch {}
-    if (content.match(/^\s*CLAUDE_CODE_OAUTH_TOKEN\s*=.*$/m)) {
-      content = content.replace(/^\s*CLAUDE_CODE_OAUTH_TOKEN\s*=.*$/m, `CLAUDE_CODE_OAUTH_TOKEN=${token}`);
-    } else {
-      content = content.trimEnd() + `\n\n# Claude Code setup token (set by zylos init)\nCLAUDE_CODE_OAUTH_TOKEN=${token}\n`;
-    }
+    content = upsertEnvValue(content, 'CLAUDE_CODE_OAUTH_TOKEN', token, 'Claude Code setup token (set by zylos init)');
     content = content.replace(/^# Anthropic API key \(set by zylos init\)\n/m, '');
     content = content.replace(/^\s*ANTHROPIC_API_KEY\s*=.*\n?/m, '');
     fs.writeFileSync(envPath, content);
   } catch {}
+}
+
+export function saveClaudeBaseUrl(baseUrl) {
+  try {
+    process.env.ANTHROPIC_BASE_URL = baseUrl;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function saveClaudeBaseUrlToSettings(baseUrl) {
+  const settingsDir = path.join(os.homedir(), '.claude');
+  const settingsPath = path.join(settingsDir, 'settings.json');
+  try {
+    fs.mkdirSync(settingsDir, { recursive: true });
+    let settings = {};
+    try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch {}
+    if (!settings.env) settings.env = {};
+    settings.env.ANTHROPIC_BASE_URL = baseUrl;
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function saveClaudeBaseUrlToSettingsAndEnv(baseUrl) {
+  const envPath = path.join(ZYLOS_DIR, '.env');
+  try {
+    if (!saveClaudeBaseUrlToSettings(baseUrl)) return false;
+    let content = '';
+    try { content = fs.readFileSync(envPath, 'utf8'); } catch {}
+    content = upsertEnvValue(content, 'ANTHROPIC_BASE_URL', baseUrl, 'Anthropic base URL for Claude Code (set by zylos init)');
+    fs.writeFileSync(envPath, content);
+    process.env.ANTHROPIC_BASE_URL = baseUrl;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ── Codex credential helpers ───────────────────────────────────────────────
@@ -248,10 +298,11 @@ export function saveSetupTokenToEnv(token) {
  * @param {string} projectDir - The zylos working directory to pre-trust
  * @returns {boolean} true on success
  */
-export function writeCodexConfig(projectDir) {
+export function writeCodexConfig(projectDir, opts = {}) {
   const codexDir = path.join(os.homedir(), '.codex');
   const configPath = path.join(codexDir, 'config.toml');
   const absProject = path.resolve(projectDir);
+  const openaiBaseUrl = opts.openaiBaseUrl || process.env.OPENAI_BASE_URL || '';
   try {
     // Preserve existing [projects.*] sections (other directories may already be trusted).
     let preservedProjects = '';
@@ -281,6 +332,7 @@ export function writeCodexConfig(projectDir) {
       '# Acknowledge the latest model NUX so the "Introducing GPT-X" dialog',
       '# is not shown on startup.  Update this when Codex ships a new default model.',
       'model_availability_nux = "gpt-5.4"',
+      ...(openaiBaseUrl ? ['', '# Use a custom OpenAI-compatible base URL', `openai_base_url = "${openaiBaseUrl.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`] : []),
       '',
       '# Suppress all known interactive notice dialogs',
       '[notice]',
@@ -330,6 +382,29 @@ export function saveCodexApiKey(apiKey) {
     authContent.OPENAI_API_KEY = apiKey;
     fs.writeFileSync(authPath, JSON.stringify(authContent, null, 2) + '\n', { mode: 0o600 });
     process.env.OPENAI_API_KEY = apiKey;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function saveCodexBaseUrl(baseUrl) {
+  try {
+    process.env.OPENAI_BASE_URL = baseUrl;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function saveCodexBaseUrlToEnv(baseUrl) {
+  const envPath = path.join(ZYLOS_DIR, '.env');
+  try {
+    let content = '';
+    try { content = fs.readFileSync(envPath, 'utf8'); } catch {}
+    content = upsertEnvValue(content, 'OPENAI_BASE_URL', baseUrl, 'OpenAI base URL for Codex (set by zylos init)');
+    fs.writeFileSync(envPath, content);
+    process.env.OPENAI_BASE_URL = baseUrl;
     return true;
   } catch {
     return false;
