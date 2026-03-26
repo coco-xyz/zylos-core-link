@@ -5,7 +5,12 @@ All notable changes to zylos-core will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.6] - 2026-03-26 ⚠️ UPGRADE STRONGLY RECOMMENDED
+## [0.4.7] - 2026-03-26
+
+### Fixed
+- **Periodic probe interval corrected to 30 minutes**: activity-monitor periodic liveness checks were unintentionally reduced from 5 minutes to 3 minutes in v0.4.1. They now run every 30 minutes as intended, avoiding unnecessary idle probe traffic while preserving message-triggered and heartbeat-based recovery paths (#426)
+
+## [0.4.6] - 2026-03-26 _(superseded by 0.4.7 — restores the intended periodic probe interval after the previous over-aggressive reduction)_ ⚠️ UPGRADE STRONGLY RECOMMENDED
 
 > **All instances should upgrade to this version.** Heartbeat probes previously used normal priority (3), which could be delayed behind queued conversation messages. This caused false liveness timeouts and unnecessary kill-restart cycles. v0.4.6 sets heartbeat priority to 0 (highest), ensuring timely delivery regardless of queue depth.
 
