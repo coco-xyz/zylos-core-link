@@ -71,9 +71,10 @@ export function createClaudeProbe({
      */
     enqueueHeartbeat(phase) {
       const deadline = phase === 'stuck' ? stuckAckDeadline : ackDeadline;
+      const content = `Heartbeat check. [phase=${phase}]`;
       try {
         const out = execFileSync('node', [C4_CONTROL, 'enqueue',
-          '--content', 'Heartbeat check.',
+          '--content', content,
           // Priority 0 = highest. Must not be lowered — heartbeat must jump
           // the queue ahead of conversation messages to avoid false timeout kills.
           '--priority', '0',

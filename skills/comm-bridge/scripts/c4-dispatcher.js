@@ -144,6 +144,38 @@ function isAgentStatusFresh() {
   }
 }
 
+export function getHeartbeatPhase(content) {
+  const match = String(content || '').match(/\[phase=([a-z-]+)\]/i);
+  return match ? match[1].toLowerCase() : 'unknown';
+}
+
+export function shouldAutoAckHeartbeat({ item, agentState, procState, confirmedActive }) {
+  const isHeartbeat = Boolean(item && (item.content || '').includes('Heartbeat check'));
+  if (!isHeartbeat) return false;
+
+  if (agentState?.healthy !== true) return false;
+
+  const agentAlive = agentState?.state !== 'offline' && agentState?.state !== 'stopped';
+  if (!agentAlive) return false;
+  if (!procState || procState.alive !== true) return false;
+
+  // Busy path: preserve the existing "confirmed active" behavior for live generation.
+  if (confirmedActive) {
+    return true;
+  }
+
+  // Idle path: only auto-ack the periodic primary probe. Recovery/stuck/down
+  // probes must still be delivered end-to-end so the heartbeat engine can
+  // observe real failures while the session is idle.
+  return (
+    getHeartbeatPhase(item.content) === 'primary' &&
+    agentState?.health === 'ok' &&
+    agentState?.state === 'idle' &&
+    agentState?.idleSeconds >= REQUIRE_IDLE_MIN_SECONDS &&
+    procState.frozen !== true
+  );
+}
+
 export function sanitizeMessage(message) {
   return message.replace(/[\x00-\x08\x0B-\x1F]/g, '');
 }
@@ -481,20 +513,24 @@ async function processNextMessage() {
   }
 
   // D1: heartbeat must not interrupt active generation.
-  // Auto-ack requires ALL four conditions:
+  // Auto-ack supports two paths:
   //   1. It's a heartbeat (not other bypass controls like context rotation)
   //   2. Agent state is not offline/stopped (proc-state can be stale for ~30s after crash)
-  //   3. /proc confirms process is alive (not just scheduled)
-  //   4. Agent is confirmed active with fresh hooks (active_tools > 0 + updated <60s)
-  // When idle (active_tools === 0) or hooks are stale, heartbeat is delivered as a
-  // real end-to-end probe to verify the agent can actually process messages.
+  //   3. /proc confirms process is alive (and idle path also requires not frozen)
+  //   4. Either:
+  //      - busy path: fresh hooks confirm active generation, or
+  //      - idle path: health=ok and idle_seconds >= sustained-idle minimum
+  // This preserves the existing busy auto-ack behavior while allowing a narrow
+  // idle auto-ack path on healthy, stable sessions.
   if (bypass) {
-    const isHeartbeat = (item.content || '').includes('Heartbeat check');
-    const agentAlive = agentState.state !== 'offline' && agentState.state !== 'stopped';
     const procState = readProcState();
     const confirmed = isAgentConfirmedActive();
-    if (isHeartbeat && agentAlive && procState && procState.alive === true && confirmed) {
-      log(`Auto-acking heartbeat id=${item.id}: /proc alive + active_tools>0 fresh (delta=${procState.lastDelta})`);
+    if (shouldAutoAckHeartbeat({ item, agentState, procState, confirmedActive: confirmed })) {
+      const phase = getHeartbeatPhase(item.content);
+      const reason = confirmed
+        ? `phase=${phase} /proc alive + active_tools>0 fresh (delta=${procState.lastDelta})`
+        : `phase=${phase} /proc alive + health=ok + idle_seconds=${agentState.idleSeconds}`;
+      log(`Auto-acking heartbeat id=${item.id}: ${reason}`);
       ackControl(item.id);
       return { delivered: true, state: agentState.state };
     }

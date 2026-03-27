@@ -27,7 +27,9 @@ const {
   getInputBoxText,
   checkInputBox,
   isUsageOverlayCapture,
-  isBypassState
+  isBypassState,
+  getHeartbeatPhase,
+  shouldAutoAckHeartbeat
 } = mod;
 
 after(() => {
@@ -256,5 +258,87 @@ describe('isBypassState', () => {
 
   it('returns false for empty object', () => {
     assert.equal(isBypassState({}), false);
+  });
+});
+
+// ── getHeartbeatPhase ───────────────────────────────────────────────
+
+describe('getHeartbeatPhase', () => {
+  it('extracts the encoded heartbeat phase from control content', () => {
+    assert.equal(getHeartbeatPhase('Heartbeat check. [phase=primary]'), 'primary');
+  });
+
+  it('returns unknown when no phase marker is present', () => {
+    assert.equal(getHeartbeatPhase('Heartbeat check.'), 'unknown');
+  });
+});
+
+// ── shouldAutoAckHeartbeat ──────────────────────────────────────────
+
+describe('shouldAutoAckHeartbeat', () => {
+  const heartbeatItem = { content: 'Heartbeat check. [phase=primary]' };
+  const aliveProc = { alive: true, frozen: false, lastDelta: 1 };
+
+  it('keeps the existing busy-path auto-ack when activity hooks confirm work is running', () => {
+    assert.equal(shouldAutoAckHeartbeat({
+      item: { content: 'Heartbeat check. [phase=recovery]' },
+      agentState: { state: 'busy', health: 'recovering', idleSeconds: 0, healthy: true },
+      procState: aliveProc,
+      confirmedActive: true
+    }), true);
+  });
+
+  it('auto-acks on the idle path when the session is healthy and stably idle', () => {
+    assert.equal(shouldAutoAckHeartbeat({
+      item: heartbeatItem,
+      agentState: { state: 'idle', health: 'ok', idleSeconds: 3, healthy: true },
+      procState: aliveProc,
+      confirmedActive: false
+    }), true);
+  });
+
+  it('does not auto-ack non-primary idle heartbeats', () => {
+    assert.equal(shouldAutoAckHeartbeat({
+      item: { content: 'Heartbeat check. [phase=stuck]' },
+      agentState: { state: 'idle', health: 'ok', idleSeconds: 10, healthy: true },
+      procState: aliveProc,
+      confirmedActive: false
+    }), false);
+  });
+
+  it('does not auto-ack idle heartbeats before the sustained-idle threshold', () => {
+    assert.equal(shouldAutoAckHeartbeat({
+      item: heartbeatItem,
+      agentState: { state: 'idle', health: 'ok', idleSeconds: 2, healthy: true },
+      procState: aliveProc,
+      confirmedActive: false
+    }), false);
+  });
+
+  it('does not auto-ack idle heartbeats while health is not ok', () => {
+    assert.equal(shouldAutoAckHeartbeat({
+      item: heartbeatItem,
+      agentState: { state: 'idle', health: 'recovering', idleSeconds: 10, healthy: true },
+      procState: aliveProc,
+      confirmedActive: false
+    }), false);
+  });
+
+  it('does not auto-ack when agent status is not fresh', () => {
+    assert.equal(shouldAutoAckHeartbeat({
+      item: heartbeatItem,
+      agentState: { state: 'idle', health: 'ok', idleSeconds: 10, healthy: false },
+      procState: aliveProc,
+      confirmedActive: false
+    }), false);
+  });
+
+  it('does not auto-ack idle heartbeats when proc-state says the agent is frozen', () => {
+    assert.equal(shouldAutoAckHeartbeat({
+      item: heartbeatItem,
+      agentState: { state: 'idle', health: 'ok', idleSeconds: 10, healthy: true },
+      procState: { alive: true, frozen: true, lastDelta: 0 },
+      confirmedActive: false
+    }), false);
   });
 });
