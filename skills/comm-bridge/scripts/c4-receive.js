@@ -86,7 +86,17 @@ function readHealthStatus() {
     if (!fs.existsSync(AGENT_STATUS_FILE)) {
       return { health: 'ok' };
     }
-    const status = JSON.parse(fs.readFileSync(AGENT_STATUS_FILE, 'utf8'));
+    let status = null;
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        status = JSON.parse(fs.readFileSync(AGENT_STATUS_FILE, 'utf8'));
+        break;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    if (!status && lastErr) throw lastErr;
     if (status && typeof status.health === 'string') {
       return status;
     }
