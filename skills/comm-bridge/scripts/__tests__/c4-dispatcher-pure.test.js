@@ -273,3 +273,17 @@ describe('shouldAutoAckHeartbeat', () => {
     }), false);
   });
 });
+
+describe('readJsonFileWithRetry', () => {
+  it('parses valid JSON from disk', () => {
+    const file = path.join(tmpDir, 'status.json');
+    fs.writeFileSync(file, '{"health":"ok"}');
+    assert.deepStrictEqual(readJsonFileWithRetry(file), { health: 'ok' });
+  });
+
+  it('throws after exhausting retries on invalid JSON', () => {
+    const file = path.join(tmpDir, 'broken.json');
+    fs.writeFileSync(file, '{"health":');
+    assert.throws(() => readJsonFileWithRetry(file, 2), /Unexpected end of JSON input|JSON/);
+  });
+});

@@ -579,6 +579,12 @@ function loadInitialHealth() {
   return { health: 'ok' };
 }
 
+function atomicWriteJson(filePath, value) {
+  const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`);
+  fs.renameSync(tmp, filePath);
+}
+
 function writeStatusFile(statusObj) {
   try {
     ensureStatusDir();
@@ -587,7 +593,7 @@ function writeStatusFile(statusObj) {
       extra.rate_limit_reset = engine.rateLimitResetTime || null;
       extra.cooldown_until = engine.cooldownUntil || null;
     }
-    fs.writeFileSync(STATUS_FILE, JSON.stringify({ ...statusObj, ...extra, health: engine.health }, null, 2));
+    atomicWriteJson(STATUS_FILE, { ...statusObj, ...extra, health: engine.health });
   } catch {
     // Best-effort.
   }

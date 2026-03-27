@@ -68,6 +68,18 @@ function nowSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
+export function readJsonFileWithRetry(filePath, attempts = 3) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return JSON.parse(readFileSync(filePath, 'utf8'));
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
 function getAgentState() {
   try {
     if (!existsSync(AGENT_STATUS_FILE)) {
@@ -80,7 +92,7 @@ function getAgentState() {
       return { state: 'offline', health: 'ok', healthy: false, reason: 'stale' };
     }
 
-    const status = JSON.parse(readFileSync(AGENT_STATUS_FILE, 'utf8'));
+    const status = readJsonFileWithRetry(AGENT_STATUS_FILE);
     let state = status.state;
 
     if (!state && typeof status.idle_seconds === 'number') {
@@ -107,7 +119,7 @@ function getAgentState() {
 function readProcState() {
   try {
     if (!existsSync(PROC_STATE_FILE)) return null;
-    const data = JSON.parse(readFileSync(PROC_STATE_FILE, 'utf8'));
+    const data = readJsonFileWithRetry(PROC_STATE_FILE);
     const age = nowSeconds() - (data.lastSampleAt || 0);
     if (age > 30) return null;
     return data;
@@ -123,7 +135,7 @@ function readProcState() {
 function isAgentConfirmedActive() {
   try {
     if (!existsSync(API_ACTIVITY_FILE)) return false;
-    const data = JSON.parse(readFileSync(API_ACTIVITY_FILE, 'utf8'));
+    const data = readJsonFileWithRetry(API_ACTIVITY_FILE);
     const updatedAt = data?.updated_at ? Math.floor(data.updated_at / 1000) : 0;
     const age = nowSeconds() - updatedAt;
     return (data?.active_tools ?? 0) > 0 && age < 60;
