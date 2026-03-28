@@ -208,7 +208,10 @@ export function getInputBoxText(capture) {
   }
 
   if (separatorIndexes.length < 2) {
-    const footerIndex = lines.findIndex(line => /tab to queue message/i.test(line));
+    const footerIndex = lines.findIndex(line =>
+      /tab to queue message/i.test(line) ||
+      /\b\d+%\s+left\s+·\s+~\//i.test(line)
+    );
     if (footerIndex === -1) {
       return null;
     }
