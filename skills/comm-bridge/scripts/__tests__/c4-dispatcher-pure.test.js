@@ -167,6 +167,18 @@ describe('getInputBoxText', () => {
     ].join('\n');
     assert.equal(getInputBoxText(capture), '');
   });
+
+  it('falls back to Codex status-line layout when queue footer is absent', () => {
+    const capture = [
+      '',
+      '› hello from lark',
+      '  wrapped line',
+      '',
+      'gpt-5.4 default · 75% left · ~/zylos',
+      '────────────────────────────────────────'
+    ].join('\n');
+    assert.equal(getInputBoxText(capture), 'hello from lark\n  wrapped line');
+  });
 });
 
 // ── checkInputBox ───────────────────────────────────────────────────
@@ -182,6 +194,11 @@ describe('checkInputBox', () => {
     assert.equal(checkInputBox(capture), 'empty');
   });
 
+  it('returns "empty" when box contains only the prompt char ›', () => {
+    const capture = makeCapture('›');
+    assert.equal(checkInputBox(capture), 'empty');
+  });
+
   it('returns "has_content" when box contains actual text', () => {
     const capture = makeCapture('some user input');
     assert.equal(checkInputBox(capture), 'has_content');
@@ -193,6 +210,11 @@ describe('checkInputBox', () => {
 
   it('returns "empty" for box with only ❯ and whitespace', () => {
     const capture = makeCapture('  \u276F  ');
+    assert.equal(checkInputBox(capture), 'empty');
+  });
+
+  it('returns "empty" for Codex separator layout with only › prompt', () => {
+    const capture = makeCapture('›');
     assert.equal(checkInputBox(capture), 'empty');
   });
 
@@ -215,6 +237,18 @@ describe('checkInputBox', () => {
       '  tab to queue message                                        72% context left'
     ].join('\n');
     assert.equal(checkInputBox(capture), 'empty');
+  });
+
+  it('returns "has_content" for Codex status-line captures', () => {
+    const capture = [
+      '',
+      '› hello from lark',
+      '  wrapped line',
+      '',
+      'gpt-5.4 default · 75% left · ~/zylos',
+      '────────────────────────────────────────'
+    ].join('\n');
+    assert.equal(checkInputBox(capture), 'has_content');
   });
 });
 
