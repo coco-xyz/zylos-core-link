@@ -1131,7 +1131,7 @@ export function step10_ensureCodexConfig(deps = {}) {
 export function step11_startCoreServices(ctx, deps = {}) {
   const startTime = Date.now();
   const fsApi = deps.fs ?? fs;
-  const restartFn = deps.restartFromEcosystem ?? restartFromEcosystem;
+  const restartFn = deps.restartManagedProcess ?? restartManagedProcess;
   const zylosDir = deps.zylosDir ?? ZYLOS_DIR;
 
   if (ctx.servicesWereRunning.length === 0) {
@@ -1166,7 +1166,11 @@ export function step11_startCoreServices(ctx, deps = {}) {
 
   for (const name of ctx.servicesWereRunning) {
     try {
-      restartFn([name], { ecosystemPath, stdio: 'pipe' });
+      restartFn(name, {
+        ecosystemPath,
+        stdio: 'pipe',
+        fallbackToPlainRestartOnError: true,
+      });
       started.push(name);
     } catch {
       failed.push(name);
