@@ -16,7 +16,7 @@ import { getZylosConfig, updateZylosConfig, ZYLOS_DIR } from '../lib/config.js';
 import { getAdapter, SUPPORTED_RUNTIMES } from '../lib/runtime/index.js';
 import { buildInstructionFile } from '../lib/runtime/instruction-builder.js';
 import { commandExists } from '../lib/shell-utils.js';
-import { restartFromEcosystem } from '../lib/pm2.js';
+import { getCoreEcosystemPath, restartFromEcosystem } from '../lib/pm2.js';
 import {
   installClaude,
   installCodex,
@@ -280,9 +280,10 @@ async function switchRuntime(target, flags) {
   // on startup it kills the other runtime's session (OTHER_SESSION in init()) after a
   // short delay, then starts the correct new session.
   console.log('\nRestarting services...');
+  const ecosystemPath = getCoreEcosystemPath();
   for (const svc of ['activity-monitor', 'c4-dispatcher']) {
     try {
-      restartFromEcosystem([svc], { stdio: 'pipe' });
+      restartFromEcosystem([svc], { ecosystemPath, stdio: 'pipe' });
       console.log(`  ${green('✓')} ${svc}`);
     } catch (e) {
       console.error(`  ${yellow(`Warning: ecosystem restart for ${svc} failed — ${e.message}`)}`);

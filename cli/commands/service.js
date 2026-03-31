@@ -36,10 +36,12 @@ export function restartServicesWithDeps({
   const services = ['activity-monitor', 'scheduler', 'c4-dispatcher', 'web-console'];
   const ecosystemPath = getCoreEcosystemPathFn();
   const fallbackServices = [];
+  let saveNeeded = false;
 
   for (const name of services) {
     try {
       restartFromEcosystemFn([name], { ecosystemPath, stdio: 'inherit' });
+      saveNeeded = true;
     } catch {
       try {
         restartManagedProcessFn(name, {
@@ -48,14 +50,20 @@ export function restartServicesWithDeps({
           fallbackToPlainRestartOnError: true,
         });
         fallbackServices.push(name);
+        saveNeeded = true;
       } catch {
+        if (saveNeeded) {
+          execSyncFn('pm2 save 2>/dev/null', { stdio: 'inherit' });
+        }
         logError(error('Failed to restart services'));
         return false;
       }
     }
   }
 
-  execSyncFn('pm2 save 2>/dev/null', { stdio: 'inherit' });
+  if (saveNeeded) {
+    execSyncFn('pm2 save 2>/dev/null', { stdio: 'inherit' });
+  }
   if (fallbackServices.length > 0) {
     logSuccess(success(`Services restarted. Plain PM2 fallback used for: ${fallbackServices.join(', ')}.`));
   } else {
