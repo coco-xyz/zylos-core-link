@@ -17,7 +17,7 @@ import { extractScriptPath, extractSkillName, getCommandHooks } from './hook-uti
 import { smartSync, formatMergeResult } from './smart-merge.js';
 import { runMigrations } from './migrate.js';
 import { writeCodexConfig } from './runtime-setup.js';
-import { getCoreEcosystemPath, restartFromEcosystem } from './pm2.js';
+import { getCoreEcosystemPath, restartManagedProcess } from './pm2.js';
 
 const REPO = 'zylos-ai/zylos-core';
 
@@ -1216,7 +1216,7 @@ export function rollbackSelf(ctx, deps = {}) {
   const results = [];
   const fsApi = deps.fs ?? fs;
   const syncTreeFn = deps.syncTree ?? syncTree;
-  const restartFn = deps.restartFromEcosystem ?? restartFromEcosystem;
+  const restartFn = deps.restartManagedProcess ?? restartManagedProcess;
   const zylosDir = deps.zylosDir ?? ZYLOS_DIR;
   const skillsDir = deps.skillsDir ?? SKILLS_DIR;
   const ecosystemPath = deps.ecosystemPath ?? getCoreEcosystemPath();
@@ -1260,7 +1260,11 @@ export function rollbackSelf(ctx, deps = {}) {
   // Restart services if they were running
   for (const name of ctx.servicesWereRunning) {
     try {
-      restartFn([name], { ecosystemPath, stdio: 'pipe' });
+      restartFn(name, {
+        ecosystemPath,
+        stdio: 'pipe',
+        fallbackToPlainRestartOnError: true,
+      });
       results.push({ action: `restart_${name}`, success: true });
     } catch (err) {
       results.push({ action: `restart_${name}`, success: false, error: err.message });

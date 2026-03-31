@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 
 const { step7_startService } = await import('../upgrade.js');
 const { step11_startCoreServices } = await import('../self-upgrade.js');
+const { restartRuntimeServices } = await import('../../commands/runtime.js');
 
 describe('step7_startService', () => {
   it('retries deleted services through ecosystem restart instead of pm2 start <name>', () => {
@@ -63,6 +64,31 @@ describe('step11_startCoreServices', () => {
     assert.deepStrictEqual(calls, [{
       names: ['activity-monitor'],
       opts: { ecosystemPath: '/tmp/core-ecosystem.config.cjs', stdio: 'pipe' },
+    }]);
+  });
+});
+
+describe('restartRuntimeServices', () => {
+  it('falls back to plain restart when the core ecosystem file is missing', () => {
+    const calls = [];
+
+    restartRuntimeServices({
+      services: ['activity-monitor'],
+      ecosystemPath: '/missing/core-ecosystem.config.cjs',
+      restartManagedProcessFn: (name, opts) => {
+        calls.push({ name, opts });
+      },
+      logSuccess: () => {},
+      logWarning: () => {},
+    });
+
+    assert.deepStrictEqual(calls, [{
+      name: 'activity-monitor',
+      opts: {
+        ecosystemPath: '/missing/core-ecosystem.config.cjs',
+        stdio: 'pipe',
+        fallbackToPlainRestartOnError: true,
+      },
     }]);
   });
 });

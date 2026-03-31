@@ -94,9 +94,9 @@ describe('self-upgrade backup and rollback', () => {
       zylosDir,
       skillsDir,
       ecosystemPath,
-      restartFromEcosystem: (names, opts) => {
+      restartManagedProcess: (name, opts) => {
         restartCalls.push({
-          names,
+          name,
           opts,
           ecosystemContent: fs.readFileSync(opts.ecosystemPath, 'utf8'),
         });
@@ -108,11 +108,44 @@ describe('self-upgrade backup and rollback', () => {
       'module.exports = { apps: ["restored"] };\n'
     );
     assert.deepStrictEqual(restartCalls, [{
-      names: ['activity-monitor'],
-      opts: { ecosystemPath, stdio: 'pipe' },
+      name: 'activity-monitor',
+      opts: { ecosystemPath, stdio: 'pipe', fallbackToPlainRestartOnError: true },
       ecosystemContent: 'module.exports = { apps: ["restored"] };\n',
     }]);
     assert.equal(results.some((item) => item.action === 'restore_pm2_ecosystem' && item.success), true);
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('falls back to plain restart when the backup has no ecosystem file', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zylos-self-upgrade-rollback-fallback-'));
+    const zylosDir = path.join(tmpDir, 'zylos');
+    const skillsDir = path.join(tmpDir, 'skills');
+    const backupDir = path.join(tmpDir, 'backup');
+    const ecosystemPath = path.join(zylosDir, 'pm2', 'ecosystem.config.cjs');
+
+    fs.mkdirSync(backupDir, { recursive: true });
+    fs.mkdirSync(path.join(zylosDir, 'pm2'), { recursive: true });
+    fs.mkdirSync(skillsDir, { recursive: true });
+
+    const restartCalls = [];
+    const results = rollbackSelf({
+      backupDir,
+      servicesWereRunning: ['activity-monitor'],
+    }, {
+      zylosDir,
+      skillsDir,
+      ecosystemPath,
+      restartManagedProcess: (name, opts) => {
+        restartCalls.push({ name, opts });
+      },
+    });
+
+    assert.deepStrictEqual(restartCalls, [{
+      name: 'activity-monitor',
+      opts: { ecosystemPath, stdio: 'pipe', fallbackToPlainRestartOnError: true },
+    }]);
+    assert.equal(results.some((item) => item.action === 'restart_activity-monitor' && item.success), true);
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
