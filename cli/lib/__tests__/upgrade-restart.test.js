@@ -55,16 +55,55 @@ describe('step11_startCoreServices', () => {
         copyFileSync: () => {},
       },
       ecosystemPath: '/tmp/core-ecosystem.config.cjs',
-      restartFromEcosystem: (names, opts) => {
-        calls.push({ names, opts });
+      restartManagedProcess: (name, opts) => {
+        calls.push({ name, opts });
       },
     });
 
     assert.equal(result.status, 'done');
     assert.deepStrictEqual(calls, [{
-      names: ['activity-monitor'],
-      opts: { ecosystemPath: '/tmp/core-ecosystem.config.cjs', stdio: 'pipe' },
+      name: 'activity-monitor',
+      opts: {
+        ecosystemPath: '/tmp/core-ecosystem.config.cjs',
+        stdio: 'pipe',
+        fallbackToPlainRestartOnError: true,
+      },
     }]);
+  });
+
+  it('uses the module default restart helper when no restart dep is injected', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zylos-step11-default-'));
+    const binDir = path.join(tmpDir, 'bin');
+    const logPath = path.join(tmpDir, 'pm2.log');
+    const ecosystemPath = path.join(tmpDir, 'ecosystem.config.cjs');
+    const pm2Path = path.join(binDir, 'pm2');
+    const originalPath = process.env.PATH;
+
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(ecosystemPath, 'module.exports = { apps: [] };\n', 'utf8');
+    fs.writeFileSync(pm2Path, `#!/bin/sh\necho \"$@\" >> "${logPath}"\n`, { mode: 0o755 });
+
+    process.env.PATH = `${binDir}:${originalPath}`;
+
+    try {
+      const result = step11_startCoreServices({
+        tempDir: null,
+        servicesWereRunning: ['activity-monitor'],
+      }, {
+        fs: {
+          existsSync: (file) => file === ecosystemPath,
+          mkdirSync: () => {},
+          copyFileSync: () => {},
+        },
+        ecosystemPath,
+      });
+
+      assert.equal(result.status, 'done');
+      assert.match(fs.readFileSync(logPath, 'utf8'), /start .*ecosystem\.config\.cjs.*--only activity-monitor/);
+    } finally {
+      process.env.PATH = originalPath;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 
