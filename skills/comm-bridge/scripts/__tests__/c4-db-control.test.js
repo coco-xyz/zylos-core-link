@@ -133,6 +133,22 @@ describe('insertControl', () => {
     assert.equal(mod.getControlById(replacement.id).status, 'pending');
   });
 
+  it('does not supersede failed or timeout controls', () => {
+    const failed = mod.insertControl('same content');
+    mod.claimControl(failed.id);
+    mod.retryOrFailControl(failed.id, 'boom', 1);
+
+    const timedOut = mod.insertControl('same content', { ackDeadlineAt: Math.floor(Date.now() / 1000) - 5 });
+    mod.expireTimedOutControls();
+
+    const replacement = mod.insertControl('same content');
+
+    assert.equal(mod.getControlById(failed.id).status, 'failed');
+    assert.equal(mod.getControlById(timedOut.id).status, 'timeout');
+    assert.equal(replacement.superseded_count, 0);
+    assert.equal(mod.getControlById(replacement.id).status, 'pending');
+  });
+
   it('strips only a trailing ack suffix when backfilling raw_content', () => {
     assert.equal(
       mod.stripTrailingAckSuffix('literal ---- ack via: inside body ---- ack via: node /tmp/c4-control.js ack --id 7'),
