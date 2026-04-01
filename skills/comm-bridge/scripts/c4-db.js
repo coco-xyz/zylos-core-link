@@ -51,6 +51,11 @@ function initSchema() {
   console.log('[C4-DB] Database initialized');
 }
 
+export function stripTrailingAckSuffix(content) {
+  if (typeof content !== 'string') return content;
+  return content.replace(/\s---- ack via: node .+ ack --id \d+$/, '');
+}
+
 function ensureControlQueueSchema(database) {
   const columns = database.prepare('PRAGMA table_info(control_queue)').all();
   const columnNames = new Set(columns.map((column) => column.name));
@@ -59,14 +64,25 @@ function ensureControlQueueSchema(database) {
     database.exec('ALTER TABLE control_queue ADD COLUMN raw_content TEXT');
   }
 
-  database.exec(`
-    UPDATE control_queue
-    SET raw_content = CASE
-      WHEN instr(content, ' ---- ack via:') > 0 THEN substr(content, 1, instr(content, ' ---- ack via:') - 1)
-      ELSE content
-    END
+  const rows = database.prepare(`
+    SELECT id, content
+    FROM control_queue
     WHERE raw_content IS NULL
+  `).all();
+
+  const updateRawContent = database.prepare(`
+    UPDATE control_queue
+    SET raw_content = ?
+    WHERE id = ?
   `);
+
+  const tx = database.transaction((pendingRows) => {
+    for (const row of pendingRows) {
+      updateRawContent.run(stripTrailingAckSuffix(row.content), row.id);
+    }
+  });
+
+  tx(rows);
 }
 
 function nowSeconds() {
@@ -267,7 +283,7 @@ export function insertControl(content, options = {}) {
       WHERE id = ?
     `).run(finalContent, current, id);
 
-    database.prepare(`
+    const supersedeResult = database.prepare(`
       UPDATE control_queue
       SET status = 'superseded', updated_at = ?, last_error = NULL
       WHERE id != ?
@@ -279,12 +295,17 @@ export function insertControl(content, options = {}) {
       content
     );
 
-    return database.prepare(`
+    const row = database.prepare(`
       SELECT id, raw_content, content, priority, require_idle, bypass_state, ack_deadline_at,
              status, retry_count, available_at, last_error, created_at, updated_at
       FROM control_queue
       WHERE id = ?
     `).get(id);
+
+    return {
+      ...row,
+      superseded_count: supersedeResult.changes || 0
+    };
   });
 
   return tx();

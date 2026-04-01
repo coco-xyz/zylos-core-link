@@ -103,6 +103,8 @@ describe('insertControl', () => {
     const oldRow = mod.getControlById(first.id);
     const newRow = mod.getControlById(second.id);
 
+    assert.equal(first.superseded_count, 0);
+    assert.equal(second.superseded_count, 1);
     assert.equal(oldRow.status, 'superseded');
     assert.equal(newRow.status, 'pending');
   });
@@ -111,6 +113,7 @@ describe('insertControl', () => {
     const base = mod.insertControl('same content', { priority: 2 });
     const replacement = mod.insertControl('same content', { priority: 3, requireIdle: true, bypassState: true });
 
+    assert.equal(replacement.superseded_count, 1);
     assert.equal(mod.getControlById(base.id).status, 'superseded');
     assert.equal(mod.getControlById(replacement.id).status, 'pending');
   });
@@ -126,7 +129,19 @@ describe('insertControl', () => {
 
     assert.equal(mod.getControlById(running.id).status, 'running');
     assert.equal(mod.getControlById(done.id).status, 'done');
+    assert.equal(replacement.superseded_count, 0);
     assert.equal(mod.getControlById(replacement.id).status, 'pending');
+  });
+
+  it('strips only a trailing ack suffix when backfilling raw_content', () => {
+    assert.equal(
+      mod.stripTrailingAckSuffix('literal ---- ack via: inside body ---- ack via: node /tmp/c4-control.js ack --id 7'),
+      'literal ---- ack via: inside body'
+    );
+    assert.equal(
+      mod.stripTrailingAckSuffix('literal ---- ack via: inside body'),
+      'literal ---- ack via: inside body'
+    );
   });
 });
 

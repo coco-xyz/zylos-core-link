@@ -162,6 +162,7 @@ describe('c4-control enqueue', () => {
       const firstRow = getControlRow(tmpDir, firstId);
       const secondRow = getControlRow(tmpDir, secondId);
 
+      assert.match(secondOut, /superseded 1 equivalent pending control\(s\)/);
       assert.equal(firstRow.status, 'superseded');
       assert.equal(secondRow.status, 'pending');
     });
