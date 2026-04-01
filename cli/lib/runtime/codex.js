@@ -8,8 +8,9 @@
  *   - Launch with --dangerously-bypass-approvals-and-sandbox flag
  *
  * Codex reads AGENTS.md from the working directory as its instruction file.
- * Interactive prompts are suppressed via ~/.codex/config.toml (trust_level = "trusted"),
- * which is written during `zylos init` by writeCodexConfig().
+ * Interactive prompts are suppressed via project-level .codex/config.toml (headless
+ * settings) and global ~/.codex/config.toml (trust declarations), both written
+ * during `zylos init` by writeCodexConfig().
  */
 
 import fs from 'node:fs';

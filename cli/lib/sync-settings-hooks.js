@@ -23,7 +23,7 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { extractScriptPath, extractSkillName, getCommandHooks } from './hook-utils.js';
 import { getZylosConfig } from './config.js';
-import { renderCodexConfig, writeCodexConfig } from './runtime-setup.js';
+import { renderCodexProjectConfig, renderCodexGlobalConfig, writeCodexConfig } from './runtime-setup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ZYLOS_DIR = path.resolve(process.env.ZYLOS_DIR || path.join(os.homedir(), 'zylos'));
@@ -50,14 +50,19 @@ export function syncTemplateModelSetting({
 export function shouldSyncCodexConfig({
   cfg = getZylosConfig(),
   homeDir = os.homedir(),
+  projectDir = ZYLOS_DIR,
   existsSync = fs.existsSync,
 } = {}) {
   const codexDir = path.join(homeDir, '.codex');
-  const configPath = path.join(codexDir, 'config.toml');
-  const hasCodexState = existsSync(configPath) || existsSync(path.join(codexDir, 'auth.json'));
+  const globalConfigPath = path.join(codexDir, 'config.toml');
+  const projectConfigPath = path.join(path.resolve(projectDir), '.codex', 'config.toml');
+  const hasCodexState = existsSync(globalConfigPath) || existsSync(path.join(codexDir, 'auth.json'));
   return {
     cfg,
-    configPath,
+    globalConfigPath,
+    projectConfigPath,
+    // Keep legacy alias for any external callers
+    configPath: globalConfigPath,
     shouldSync: cfg.runtime === 'codex' || hasCodexState,
   };
 }
@@ -69,44 +74,47 @@ export function syncCodexConfig({
   homeDir = os.homedir(),
   existsSync = fs.existsSync,
   readFileSync = fs.readFileSync,
-  renderConfig = renderCodexConfig,
   writeConfig = writeCodexConfig,
   log = console.log,
 } = {}) {
-  const state = shouldSyncCodexConfig({ cfg, homeDir, existsSync });
+  const state = shouldSyncCodexConfig({ cfg, homeDir, projectDir, existsSync });
   if (!state.shouldSync) {
     return { attempted: false, changed: false, fatal: false };
   }
 
-  let existing = '';
-  try {
-    existing = readFileSync(state.configPath, 'utf8');
-  } catch {}
+  // Check both project-level and global config for drift
+  let existingGlobal = '';
+  try { existingGlobal = readFileSync(state.globalConfigPath, 'utf8'); } catch {}
+  let existingProject = '';
+  try { existingProject = readFileSync(state.projectConfigPath, 'utf8'); } catch {}
 
-  const desired = renderConfig(projectDir, existing);
-  if (existing === desired) {
+  const desiredProject = renderCodexProjectConfig();
+  const desiredGlobal = renderCodexGlobalConfig(projectDir, existingGlobal);
+  if (existingProject === desiredProject && existingGlobal === desiredGlobal) {
     return { attempted: true, changed: false, fatal: false };
   }
 
   if (dryRun) {
-    log(`  ~ codex config: ${state.configPath}`);
+    if (existingProject !== desiredProject) log(`  ~ codex project config: ${state.projectConfigPath}`);
+    if (existingGlobal !== desiredGlobal) log(`  ~ codex global config: ${state.globalConfigPath}`);
     return { attempted: true, changed: true, fatal: false };
   }
 
   if (!writeConfig(projectDir)) {
     if (cfg.runtime !== 'codex') {
-      log('  Warning: failed to refresh ~/.codex/config.toml outside codex runtime.');
+      log('  Warning: failed to refresh codex config outside codex runtime.');
       return { attempted: true, changed: false, fatal: false, warning: true };
     }
     return {
       attempted: true,
       changed: false,
       fatal: true,
-      error: 'Failed to refresh ~/.codex/config.toml.',
+      error: 'Failed to refresh codex config.',
     };
   }
 
-  log(`  ~ codex config: ${state.configPath}`);
+  if (existingProject !== desiredProject) log(`  ~ codex project config: ${state.projectConfigPath}`);
+  if (existingGlobal !== desiredGlobal) log(`  ~ codex global config: ${state.globalConfigPath}`);
   return { attempted: true, changed: true, fatal: false };
 }
 
