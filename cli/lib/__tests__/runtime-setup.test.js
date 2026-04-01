@@ -17,7 +17,7 @@ process.env.ZYLOS_DIR = fakeZylosDir;
 fs.mkdirSync(fakeHome, { recursive: true });
 fs.mkdirSync(fakeZylosDir, { recursive: true });
 
-const { writeCodexConfig } = await import('../runtime-setup.js');
+const { writeCodexConfig, renderCodexProjectConfig, renderCodexGlobalConfig } = await import('../runtime-setup.js');
 
 before(() => {
   fs.mkdirSync(path.join(fakeHome, '.codex'), { recursive: true });
@@ -33,22 +33,94 @@ after(() => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
+describe('renderCodexProjectConfig', () => {
+  it('includes headless settings, features, and notice suppression', () => {
+    const content = renderCodexProjectConfig();
+    assert.match(content, /check_for_update_on_startup = false/);
+    assert.match(content, /model_availability_nux = "gpt-5\.4"/);
+    assert.match(content, /\[features\]\nmulti_agent = true/);
+    assert.match(content, /\[notice\]/);
+    assert.match(content, /hide_full_access_warning = true/);
+    assert.match(content, /hide_rate_limit_model_nudge = true/);
+    assert.match(content, /\[notice\.model_migrations\]/);
+  });
+
+  it('does not include trust declarations or base URL', () => {
+    const content = renderCodexProjectConfig();
+    assert.doesNotMatch(content, /\[projects\./);
+    assert.doesNotMatch(content, /trust_level/);
+    assert.doesNotMatch(content, /openai_base_url/);
+  });
+});
+
+describe('renderCodexGlobalConfig', () => {
+  it('includes trust declaration for the project directory', () => {
+    const content = renderCodexGlobalConfig('/home/user/zylos');
+    assert.match(content, /\[projects\."\/home\/user\/zylos"\]\ntrust_level = "trusted"/);
+  });
+
+  it('preserves unrelated trust entries', () => {
+    const existing = [
+      '[projects."/tmp/other-project"]',
+      'trust_level = "trusted"',
+      '',
+    ].join('\n');
+    const content = renderCodexGlobalConfig('/home/user/zylos', existing);
+    assert.match(content, /\[projects\."\/tmp\/other-project"\]/);
+    assert.match(content, /\[projects\."\/home\/user\/zylos"\]/);
+  });
+
+  it('does not include headless settings or features', () => {
+    const content = renderCodexGlobalConfig('/home/user/zylos');
+    assert.doesNotMatch(content, /\[features\]/);
+    assert.doesNotMatch(content, /\[notice\]/);
+    assert.doesNotMatch(content, /check_for_update_on_startup/);
+  });
+
+  it('includes openai_base_url when provided', () => {
+    const content = renderCodexGlobalConfig('/home/user/zylos', '', { openaiBaseUrl: 'https://proxy.example.com/v1' });
+    assert.match(content, /openai_base_url = "https:\/\/proxy\.example\.com\/v1"/);
+  });
+});
+
 describe('writeCodexConfig', () => {
-  it('writes multi_agent feature and preserves unrelated trusted projects', () => {
-    const codexDir = path.join(fakeHome, '.codex');
-    const configPath = path.join(codexDir, 'config.toml');
+  it('writes project-level config and global config to separate locations', () => {
+    const globalConfigPath = path.join(fakeHome, '.codex', 'config.toml');
     const projectDir = path.join(fakeZylosDir, 'workspace', 'project-a');
+    const projectConfigPath = path.join(path.resolve(projectDir), '.codex', 'config.toml');
+
+    fs.mkdirSync(projectDir, { recursive: true });
+
+    assert.equal(writeCodexConfig(projectDir), true);
+
+    // Project-level config has headless settings
+    const projectContent = fs.readFileSync(projectConfigPath, 'utf8');
+    assert.match(projectContent, /\[features\]\nmulti_agent = true/);
+    assert.match(projectContent, /\[notice\]/);
+    assert.match(projectContent, /check_for_update_on_startup = false/);
+    assert.doesNotMatch(projectContent, /\[projects\./);
+
+    // Global config has trust only
+    const globalContent = fs.readFileSync(globalConfigPath, 'utf8');
+    assert.match(
+      globalContent,
+      new RegExp(`\\[projects\\."${escapeRegExp(path.resolve(projectDir))}"\\]\\ntrust_level = "trusted"`)
+    );
+    assert.doesNotMatch(globalContent, /\[features\]/);
+    assert.doesNotMatch(globalContent, /\[notice\]/);
+  });
+
+  it('preserves unrelated trusted projects in global config', () => {
+    const globalConfigPath = path.join(fakeHome, '.codex', 'config.toml');
+    const projectDir = path.join(fakeZylosDir, 'workspace', 'project-b');
     const otherProjectDir = path.join(tmpRoot, 'other-project');
 
     fs.mkdirSync(projectDir, { recursive: true });
     fs.mkdirSync(otherProjectDir, { recursive: true });
 
     fs.writeFileSync(
-      configPath,
+      globalConfigPath,
       [
-        '[projects."/tmp/old-project"]',
-        'trust_level = "trusted"',
-        '',
         `[projects."${otherProjectDir}"]`,
         'trust_level = "trusted"',
         '',
@@ -61,19 +133,17 @@ describe('writeCodexConfig', () => {
 
     assert.equal(writeCodexConfig(projectDir), true);
 
-    const content = fs.readFileSync(configPath, 'utf8');
-    assert.match(content, /\[features\]\nmulti_agent = true\n/);
-    assert.match(content, /\[notice\]/);
+    const globalContent = fs.readFileSync(globalConfigPath, 'utf8');
     assert.match(
-      content,
+      globalContent,
       new RegExp(`\\[projects\\."${escapeRegExp(path.resolve(projectDir))}"\\]\\ntrust_level = "trusted"`)
     );
     assert.match(
-      content,
+      globalContent,
       new RegExp(`\\[projects\\."${escapeRegExp(otherProjectDir)}"\\]\\ntrust_level = "trusted"`)
     );
     assert.doesNotMatch(
-      content,
+      globalContent,
       new RegExp(`\\[projects\\."${escapeRegExp(path.resolve(projectDir))}"\\]\\ntrust_level = "untrusted"`)
     );
   });

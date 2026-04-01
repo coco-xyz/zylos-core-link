@@ -31,7 +31,7 @@ describe('step10_ensureCodexConfig', () => {
     });
 
     assert.equal(result.status, 'skipped');
-    assert.match(result.message, /warning: failed to refresh ~\/\.codex\/config\.toml outside codex runtime/);
+    assert.match(result.message, /warning: failed to refresh codex config outside codex runtime/);
   });
 
   it('still fails when codex runtime cannot write codex config', () => {
@@ -43,7 +43,7 @@ describe('step10_ensureCodexConfig', () => {
     });
 
     assert.equal(result.status, 'failed');
-    assert.equal(result.error, 'failed to write ~/.codex/config.toml');
+    assert.equal(result.error, 'failed to write codex config');
   });
 });
 

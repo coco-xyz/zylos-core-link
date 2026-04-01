@@ -1115,14 +1115,14 @@ export function step10_ensureCodexConfig(deps = {}) {
         step: 10,
         name: 'ensure_codex_config',
         status: 'skipped',
-        message: 'warning: failed to refresh ~/.codex/config.toml outside codex runtime',
+        message: 'warning: failed to refresh codex config outside codex runtime',
         duration: Date.now() - startTime
       };
     }
-    return { step: 10, name: 'ensure_codex_config', status: 'failed', error: 'failed to write ~/.codex/config.toml', duration: Date.now() - startTime };
+    return { step: 10, name: 'ensure_codex_config', status: 'failed', error: 'failed to write codex config', duration: Date.now() - startTime };
   }
 
-  return { step: 10, name: 'ensure_codex_config', status: 'done', message: 'updated ~/.codex/config.toml', duration: Date.now() - startTime };
+  return { step: 10, name: 'ensure_codex_config', status: 'done', message: 'updated codex config (project + global)', duration: Date.now() - startTime };
 }
 
 /**

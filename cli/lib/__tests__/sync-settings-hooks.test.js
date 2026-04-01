@@ -70,15 +70,15 @@ describe('syncCodexConfig', () => {
   it('refreshes stale codex config when codex state exists outside codex runtime', () => {
     const writes = [];
     const logs = [];
-    const configPath = '/tmp/home/.codex/config.toml';
+    const globalConfigPath = '/tmp/home/.codex/config.toml';
 
     const result = syncCodexConfig({
       cfg: { runtime: 'claude' },
       homeDir: '/tmp/home',
       projectDir: '/tmp/zylos',
-      existsSync: (filePath) => filePath === configPath,
-      readFileSync: () => 'model = "gpt-5.3-codex"\n',
-      renderConfig: () => 'model = "gpt-5.3-codex"\n[features]\nmulti_agent = true\n',
+      existsSync: (filePath) => filePath === globalConfigPath,
+      // Return stale content so drift is detected
+      readFileSync: () => 'stale-content\n',
       writeConfig: (projectDir) => {
         writes.push(projectDir);
         return true;
@@ -88,7 +88,7 @@ describe('syncCodexConfig', () => {
 
     assert.equal(result.changed, true);
     assert.deepEqual(writes, ['/tmp/zylos']);
-    assert.ok(logs.some(line => line.includes('codex config')));
+    assert.ok(logs.some(line => line.includes('codex')));
   });
 
   it('treats refresh failures as fatal only in codex runtime', () => {
@@ -97,8 +97,8 @@ describe('syncCodexConfig', () => {
       homeDir: '/tmp/home',
       projectDir: '/tmp/zylos',
       existsSync: () => true,
-      readFileSync: () => 'model = "gpt-5.3-codex"\n',
-      renderConfig: () => 'model = "gpt-5.3-codex"\n[features]\nmulti_agent = true\n',
+      // Return stale content so drift is detected
+      readFileSync: () => 'stale-content\n',
       writeConfig: () => false,
       log: () => {},
     });
